@@ -1,0 +1,173 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Studio dark palette (Phase 1 backward-compatible variables) */
+    --background: 224 25% 6%;
+    --foreground: 220 40% 98%;
+
+    --card: 224 20% 9%;
+    --card-foreground: 220 40% 98%;
+
+    --popover: 224 18% 13%;
+    --popover-foreground: 220 40% 98%;
+
+    --primary: 239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 224 18% 13%;
+    --secondary-foreground: 220 40% 98%;
+
+    --muted: 224 15% 12%;
+    --muted-foreground: 220 12% 46%;
+
+    --accent: 239 84% 67%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 224 15% 16%;
+    --input: 224 15% 16%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.25rem; /* 4px restrained radius */
+
+    /* Phase 2.1: Extended Studio Semantic Design Tokens */
+    --surface: 224 20% 9%;
+    --surface-elevated: 224 18% 13%;
+    --surface-overlay: 224 25% 4%;
+
+    --border-subtle: 224 15% 12%;
+    --border-active: 224 18% 26%;
+
+    --text-primary: 220 40% 98%;
+    --text-secondary: 218 15% 65%;
+    --text-muted: 220 12% 46%;
+    --text-inverse: 224 25% 6%;
+
+    --selection: 217 91% 60%;
+    --selection-foreground: 0 0% 100%;
+
+    --success: 158 64% 52%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+
+    --error: 0 84% 60%;
+    --error-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Consistent focus-visible ring across interactive elements */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Accessible text selection */
+  ::selection {
+    background-color: hsla(var(--selection) / 0.3);
+    color: hsl(var(--text-primary));
+  }
+}
+
+@layer utilities {
+  /* Typography role utilities */
+  .text-display {
+    font-size: 2rem;
+    line-height: 2.25rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+
+  .text-h1 {
+    font-size: 1.5rem;
+    line-height: 1.875rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .text-h2 {
+    font-size: 1.25rem;
+    line-height: 1.625rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+
+  .text-h3 {
+    font-size: 1.125rem;
+    line-height: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .text-body {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 400;
+    letter-spacing: 0em;
+  }
+
+  .text-small {
+    font-size: 0.8125rem;
+    line-height: 1.125rem;
+    font-weight: 400;
+    letter-spacing: 0em;
+  }
+
+  .text-caption {
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 400;
+    letter-spacing: 0.01em;
+  }
+
+  .text-label {
+    font-size: 0.6875rem;
+    line-height: 0.875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .text-btn {
+    font-size: 0.8125rem;
+    line-height: 1.125rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+
+  .text-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+}
+
+/* Reduced motion accessibility support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
