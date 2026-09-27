@@ -8,16 +8,17 @@ This registry tracks the status and lockdown specifications of all development p
 
 ```text
 ========================================
-PHASE 4 — PROJECT STORAGE & PERSISTENCE
+PHASE 5 — VISUAL EDITOR
 ========================================
 
-4.1 Storage Architecture & Abstraction — LOCKED
-4.2 Local Project Storage (IndexedDB) — LOCKED
-4.3 Application-Level Storage Operations — LOCKED
-4.4 Project Autosave & Recovery Infrastructure — LOCKED
-4.5 Final Review & Architecture Lock — LOCKED
+5.1 Editor Architecture & Canvas Foundation — LOCKED
+5.2 Project & Scene Rendering — LOCKED
+5.3 Selection & Manipulation — LOCKED
+5.4 Element Editing — LOCKED
+5.5 Properties / Inspector Panel — LOCKED
+5.6 Final Integration & Architecture Lock — LOCKED
 
-PHASE 4 STATUS:
+PHASE 5 STATUS:
 COMPLETED / LOCKED
 ```
 
@@ -446,8 +447,62 @@ COMPLETED / LOCKED
 
 ---
 
+### Phase 5 — Visual Editor
+* **Status**: COMPLETED / LOCKED
+* **Completion Date**: 2026-09-27
+* **Sub-Phases**:
+  - 5.1 Editor Architecture & Canvas Foundation: LOCKED
+  - 5.2 Project & Scene Rendering: LOCKED
+  - 5.3 Selection & Manipulation: LOCKED
+  - 5.4 Element Editing: LOCKED
+  - 5.5 Properties / Inspector Panel: LOCKED
+  - 5.6 Final Integration & Architecture Lock: LOCKED
+* **Files Created**:
+  - `types/editor.ts` (Editor state machine, tool selection, canvas viewport, and manipulation types)
+  - `services/editor/editor-state.ts` (Editor state management, selection resolution, viewport zoom/pan, project/scene binding)
+  - `services/editor/coordinate-system.ts` (Bidirectional coordinate mapping: project ↔ canvas ↔ viewport)
+  - `services/editor/selection-system.ts` (Single & multi-selection, deselection, selection bounds)
+  - `services/editor/element-manipulation.ts` (Move, resize 8-direction handles, rotate, clamp, snap-to-grid)
+  - `services/editor/element-editing.ts` (Text, Shape, Image property validation, sanitization, immutable update pipeline)
+  - `services/editor/index.ts` (Barrel export for editor services)
+  - `components/editor/editor-canvas.tsx` (Interactive canvas stage, zoom/pan navigation, coordinate stage container)
+  - `components/editor/scene-renderer.tsx` (Deterministic SVG/DOM scene and element renderer)
+  - `components/editor/selection-overlay.tsx` (Selection bounding box, 8 resize handles, rotation handle)
+  - `components/editor/element-controls.tsx` (Element interaction controls and locked/hidden indicators)
+  - `components/editor/canvas-inspector.tsx` (Properties inspector panel container with locked element guards)
+  - `components/editor/inspector/project-scene-section.tsx` (Project & scene metadata overview when unselected)
+  - `components/editor/inspector/transform-section.tsx` (Transform coordinates, dimensions, rotation, scale, opacity)
+  - `components/editor/inspector/text-section.tsx` (Kinetic typography controls: content, font, size, weight, alignment, line-height, letter-spacing, color)
+  - `components/editor/inspector/shape-section.tsx` (Procedural shape controls: kind, fill, radius, vertices, stroke)
+  - `components/editor/inspector/image-section.tsx` (Image media controls: source/asset, object fit, radius)
+  - `components/editor/inspector/index.ts` (Barrel export for modular inspector sections)
+  - `components/editor/index.ts` (Barrel export for editor UI components)
+  - `tests/editor-architecture.test.ts` (Editor state, viewport, and coordinate mapping tests)
+  - `tests/scene-rendering.test.ts` (Scene background, element fill, layering, and rendering tests)
+  - `tests/element-manipulation.test.ts` (Move, resize, rotate, snap, locked element guard tests)
+  - `tests/element-editing.test.ts` (Text, shape, image editing, validation, and Phase 3 schema integrity tests)
+  - `tests/canvas-inspector.test.ts` (Inspector panel integration, unselected overview, transform, property mutator tests)
+* **Files Modified**: None (All Phase 1–4 files strictly locked and untouched)
+* **Protected Architecture & Interfaces**:
+  - Editor State Contract (`EditorState`, `CanvasViewport`, `EditorTool`, `SelectionState`, `DragOperation`)
+  - Coordinate System Pipeline (`projectToViewportPoint`, `viewportToProjectPoint`, `projectToViewportRect`, `clampZoom`, `calculateFitViewport`)
+  - Element Manipulation Engine (`moveElement`, `resizeElement`, `rotateElement`, `calculateRotationAngle`, `snapAngle`, `normalizeAngle`)
+  - Element Editing Pipeline (`updateTextProperties`, `updateShapeProperties`, `updateImageProperties`, `updateElementInActiveScene`)
+  - Modular Properties Inspector (`CanvasInspector`, `TransformSection`, `TextSection`, `ShapeSection`, `ImageSection`, `ProjectSceneSection`)
+  - Strict preservation of locked elements against manipulation and editing
+  - Absolute preservation of Phase 3 schema integrity (`validateProjectDeep`)
+* **Tests Performed**:
+  - Complete test suite (`npx tsx --test tests/*.test.ts`): PASSED (141 of 141 tests passing across 13 suites)
+  - TypeScript strict compile verification (`tsc --noEmit`): PASSED (0 errors)
+  - ESLint verification (`next lint`): PASSED (0 warnings, 0 errors)
+  - Production build (`next build`): PASSED (All 9 static pages pre-rendered successfully)
+  - Locked phases preservation check (Phase 1, Phase 2, Phase 3, Phase 4): PASSED
+* **Known Limitations**:
+  - Visual editor rendering, selection, manipulation, and properties editing complete; motion engine, keyframe evaluation, and playback belong to Phase 6.
+
+---
+
 ### Subsequent Phases (Planned)
-* Phase 5 — Visual Editor (Planned)
 * Phase 6 — Motion Engine (Planned)
 * Phase 7 — Timeline & Playback (Planned)
 * Phase 8 — AI Creative System (Planned)
@@ -461,3 +516,4 @@ COMPLETED / LOCKED
 * Phase 16 — Testing & Security (Planned)
 * Phase 17 — Deployment (Planned)
 * Phase 18 — Final Product Polish & V1 (Planned)
+
