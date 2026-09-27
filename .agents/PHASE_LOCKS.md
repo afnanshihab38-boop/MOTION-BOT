@@ -8,16 +8,16 @@ This registry tracks the status and lockdown specifications of all development p
 
 ```text
 ========================================
-PHASE 3 — PROJECT & DATA ARCHITECTURE
+PHASE 4 — PROJECT STORAGE & PERSISTENCE
 ========================================
 
-3.1 Data Architecture & Type System — LOCKED
-3.2 Project & Scene Model — LOCKED
-3.3 Element & Asset Model — LOCKED
-3.4 Animation & Timeline Data Model — LOCKED
-3.5 Validation & Serialization — LOCKED
+4.1 Storage Architecture & Abstraction — LOCKED
+4.2 Local Project Storage (IndexedDB) — LOCKED
+4.3 Application-Level Storage Operations — LOCKED
+4.4 Project Autosave & Recovery Infrastructure — LOCKED
+4.5 Final Review & Architecture Lock — LOCKED
 
-PHASE 3 STATUS:
+PHASE 4 STATUS:
 COMPLETED / LOCKED
 ```
 
@@ -364,9 +364,89 @@ COMPLETED / LOCKED
 
 ---
 
+### Phase 4.1 — Storage Architecture & Abstraction
+* **Status**: COMPLETED / LOCKED
+* **Completion Date**: 2026-09-27
+* **Files Created**:
+  - `types/storage.ts` (Storage abstraction contracts, error codes, query options, ProjectSummary)
+  - `services/storage/storage-error.ts` (StorageResult and StorageError helpers, type guards)
+  - `services/storage/project-storage.ts` (extractProjectSummary, filterAndSortSummaries)
+  - `services/storage/memory-adapter.ts` (In-memory reference storage driver)
+  - `services/storage/storage-service.ts` (StorageService high-level persistence coordinator)
+  - `tests/storage-abstraction.test.ts` (Unit test suite for storage abstraction)
+* **Files Modified**: None
+* **Protected Architecture & Interfaces**:
+  - `IStorageService`, `ProjectStorageAdapter`, `StorageResult<T>`, `StorageError`, `StorageErrorCode`, `ProjectSummary`, `ProjectQueryOptions`, `ProjectListResult`, `StorageBackendType`
+
+---
+
+### Phase 4.2 — Local Project Storage (IndexedDB)
+* **Status**: COMPLETED / LOCKED
+* **Completion Date**: 2026-09-27
+* **Files Created**:
+  - `services/storage/indexeddb-adapter.ts` (IndexedDB persistence engine with connection pooling, indexes, schema versioning, and error mapping)
+  - `tests/indexeddb-storage.test.ts` (IndexedDB unit tests covering initialization, CRUD, missing projects, duplicate prevention, and corruption rejection)
+* **Files Modified**:
+  - `services/storage/index.ts` (Exported IndexedDB adapter)
+  - `services/storage/storage-service.ts` (Added default browser IndexedDB detection)
+* **Protected Architecture & Interfaces**:
+  - Database: `motionbot_db` (v1), Store: `projects` (`keyPath: "id"`), Indexes: `updatedAt`, `createdAt`, `name`, `schemaVersion`
+  - `IndexedDBProjectStorageAdapter`
+
+---
+
+### Phase 4.3 — Application-Level Storage Operations
+* **Status**: COMPLETED / LOCKED
+* **Completion Date**: 2026-09-27
+* **Files Created**:
+  - `services/storage/project-repository.ts` (Domain repository providing CRUD, duplication, validation enforcement, and timestamp management)
+  - `tests/project-repository.test.ts` (Unit tests covering repository operations, duplication isolation, and multi-instance persistence)
+* **Files Modified**:
+  - `services/storage/index.ts` (Exported `project-repository`)
+* **Protected Architecture & Interfaces**:
+  - `IProjectRepository`, `ProjectRepository`, `createProjectRepository`, `getProjectRepository`
+  - Deep validation enforcement before persistence
+  - Recursive ID regeneration for scene and element duplication
+
+---
+
+### Phase 4.4 — Project Autosave & Recovery Infrastructure
+* **Status**: COMPLETED / LOCKED
+* **Completion Date**: 2026-09-27
+* **Files Created**:
+  - `services/storage/autosave-manager.ts` (Debounced autosave manager, sync state machine, concurrency guard, and recovery snapshot system)
+  - `tests/autosave.test.ts` (Unit tests covering scheduling, debouncing, failed save safety, recovery rollbacks, and queuing)
+* **Files Modified**:
+  - `services/storage/index.ts` (Exported `autosave-manager`)
+* **Protected Architecture & Interfaces**:
+  - `AutosaveManager`, `createAutosaveManager`, `AutosaveStatus`, `AutosaveState`, `AutosaveOptions`, `AutosaveSubscriber`
+  - Zero UI coupling to IndexedDB
+  - Failed save data preservation guarantee
+
+---
+
+### Phase 4.5 — Final Review & Architecture Lock
+* **Status**: COMPLETED / LOCKED
+* **Completion Date**: 2026-09-27
+* **Files Created**: None
+* **Files Modified**:
+  - `.agents/PHASE_LOCKS.md`
+  - `services/README.md`
+* **Protected Architecture & Interfaces**:
+  - Complete Phase 4 Storage & Persistence System (`StorageService` -> `ProjectStorageAdapter` -> `IndexedDBProjectStorageAdapter` / `MemoryProjectStorageAdapter`)
+  - Application Repository & Autosave (`ProjectRepository`, `AutosaveManager`)
+* **Tests Performed**:
+  - Complete test suite (`npx tsx --test tests/*.test.ts`): PASSED (65 of 65 tests passing across 8 suites)
+  - TypeScript strict compile verification (`tsc --noEmit`): PASSED (0 errors)
+  - ESLint verification (`next lint`): PASSED (0 warnings, 0 errors)
+  - Production build (`next build`): PASSED (All 9 static pages pre-rendered successfully)
+  - Locked phases preservation check (Phase 1, 2.1–2.6, 3.1–3.5): PASSED
+* **Known Limitations**:
+  - Local browser storage and in-memory persistence complete; cloud remote synchronization and backend user auth belong to Phase 12.
+
+---
+
 ### Subsequent Phases (Planned)
-* Phase 3 — Project & Data Architecture (Planned)
-* Phase 4 — Project Storage (Planned)
 * Phase 5 — Visual Editor (Planned)
 * Phase 6 — Motion Engine (Planned)
 * Phase 7 — Timeline & Playback (Planned)
