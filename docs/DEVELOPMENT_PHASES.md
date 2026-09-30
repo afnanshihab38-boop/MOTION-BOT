@@ -10,14 +10,14 @@ This document defines the 18-phase implementation roadmap for MOTION-BOT.
 
 | Phase | Phase Name | Status |
 |---|---|---|
-| **Phase 1** | **Foundation** | **IN PROGRESS** |
-| Phase 2 | Design System & UI | Planned |
-| Phase 3 | Project & Data Architecture | Planned |
-| Phase 4 | Project Storage | Planned |
-| Phase 5 | Visual Editor | Planned |
-| Phase 6 | Motion Engine | Planned |
-| Phase 7 | Timeline & Playback | Planned |
-| Phase 8 | AI Creative System | Planned |
+| **Phase 1** | **Foundation** | **LOCKED** |
+| **Phase 2** | **Design System & UI** | **LOCKED** |
+| **Phase 3** | **Project & Data Architecture** | **LOCKED** |
+| **Phase 4** | **Project Storage** | **LOCKED** |
+| **Phase 5** | **Visual Editor** | **LOCKED** |
+| **Phase 6** | **Motion Engine** | **LOCKED** |
+| **Phase 7** | **Timeline & Playback / AI Subsystem** | **LOCKED** |
+| **Phase 8** | **AI Creative System (Next)** | Planned |
 | Phase 9 | AI → Editor Integration | Planned |
 | Phase 10 | Assets, Templates & Mockups | Planned |
 | Phase 11 | Rendering & Export | Planned |
