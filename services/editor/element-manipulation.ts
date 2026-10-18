@@ -5,7 +5,7 @@
  * Part of Phase 5.3: Basic Element Selection & Manipulation.
  */
 
-import { Transform2D, MotionElement } from "@/types/element";
+import { Transform2D, MotionElement, TextElement } from "@/types/element";
 import { ResizeHandleId, CanvasPoint } from "@/types/editor";
 import { snapToGrid } from "./coordinate-system";
 
@@ -186,8 +186,8 @@ export function calculateResizeTransform(
   const minW = options.minWidth || MIN_ELEMENT_DIMENSION;
   const minH = options.minHeight || MIN_ELEMENT_DIMENSION;
 
-  const anchorX = initial.anchorX ?? 0.5;
-  const anchorY = initial.anchorY ?? 0.5;
+  const anchorX = typeof initial.anchorX === "number" ? initial.anchorX : 0.5;
+  const anchorY = typeof initial.anchorY === "number" ? initial.anchorY : 0.5;
 
   // Un-rotate delta vector if the element has rotation
   const rad = (-initial.rotation * Math.PI) / 180;
@@ -201,69 +201,124 @@ export function calculateResizeTransform(
   let localShiftX = 0;
   let localShiftY = 0;
 
-  switch (handle) {
-    case "e": {
-      newWidth = Math.max(initial.width + localDx, minW);
-      const actualChange = newWidth - initial.width;
-      localShiftX = actualChange * (1 - anchorX);
-      break;
+  const isCorner = handle === "nw" || handle === "ne" || handle === "se" || handle === "sw";
+
+  if (options.preserveAspect && isCorner && initial.width > 0 && initial.height > 0) {
+    const aspect = initial.width / initial.height;
+    let rawW = initial.width;
+    let rawH = initial.height;
+    switch (handle) {
+      case "se":
+        rawW = initial.width + localDx;
+        rawH = initial.height + localDy;
+        break;
+      case "sw":
+        rawW = initial.width - localDx;
+        rawH = initial.height + localDy;
+        break;
+      case "ne":
+        rawW = initial.width + localDx;
+        rawH = initial.height - localDy;
+        break;
+      case "nw":
+        rawW = initial.width - localDx;
+        rawH = initial.height - localDy;
+        break;
     }
-    case "w": {
-      newWidth = Math.max(initial.width - localDx, minW);
-      const actualChange = newWidth - initial.width;
-      localShiftX = -actualChange * anchorX;
-      break;
+    const scaleW = rawW / initial.width;
+    const scaleH = rawH / initial.height;
+    const scale = Math.abs(scaleW - 1) > Math.abs(scaleH - 1) ? scaleW : scaleH;
+    const safeScale = Math.max(0.001, scale);
+    newWidth = Math.max(initial.width * safeScale, minW);
+    newHeight = Math.max(newWidth / aspect, minH);
+    newWidth = newHeight * aspect;
+
+    const dw = newWidth - initial.width;
+    const dh = newHeight - initial.height;
+
+    switch (handle) {
+      case "se":
+        localShiftX = dw * anchorX;
+        localShiftY = dh * anchorY;
+        break;
+      case "sw":
+        localShiftX = -dw * (1 - anchorX);
+        localShiftY = dh * anchorY;
+        break;
+      case "ne":
+        localShiftX = dw * anchorX;
+        localShiftY = -dh * (1 - anchorY);
+        break;
+      case "nw":
+        localShiftX = -dw * (1 - anchorX);
+        localShiftY = -dh * (1 - anchorY);
+        break;
     }
-    case "s": {
-      newHeight = Math.max(initial.height + localDy, minH);
-      const actualChange = newHeight - initial.height;
-      localShiftY = actualChange * (1 - anchorY);
-      break;
+  } else {
+    switch (handle) {
+      case "e": {
+        newWidth = Math.max(initial.width + localDx, minW);
+        const actualChange = newWidth - initial.width;
+        localShiftX = actualChange * anchorX;
+        break;
+      }
+      case "w": {
+        newWidth = Math.max(initial.width - localDx, minW);
+        const actualChange = newWidth - initial.width;
+        localShiftX = -actualChange * (1 - anchorX);
+        break;
+      }
+      case "s": {
+        newHeight = Math.max(initial.height + localDy, minH);
+        const actualChange = newHeight - initial.height;
+        localShiftY = actualChange * anchorY;
+        break;
+      }
+      case "n": {
+        newHeight = Math.max(initial.height - localDy, minH);
+        const actualChange = newHeight - initial.height;
+        localShiftY = -actualChange * (1 - anchorY);
+        break;
+      }
+      case "se": {
+        newWidth = Math.max(initial.width + localDx, minW);
+        newHeight = Math.max(initial.height + localDy, minH);
+        const dw = newWidth - initial.width;
+        const dh = newHeight - initial.height;
+        localShiftX = dw * anchorX;
+        localShiftY = dh * anchorY;
+        break;
+      }
+      case "sw": {
+        newWidth = Math.max(initial.width - localDx, minW);
+        newHeight = Math.max(initial.height + localDy, minH);
+        const dw = newWidth - initial.width;
+        const dh = newHeight - initial.height;
+        localShiftX = -dw * (1 - anchorX);
+        localShiftY = dh * anchorY;
+        break;
+      }
+      case "ne": {
+        newWidth = Math.max(initial.width + localDx, minW);
+        newHeight = Math.max(initial.height - localDy, minH);
+        const dw = newWidth - initial.width;
+        const dh = newHeight - initial.height;
+        localShiftX = dw * anchorX;
+        localShiftY = -dh * (1 - anchorY);
+        break;
+      }
+      case "nw": {
+        newWidth = Math.max(initial.width - localDx, minW);
+        newHeight = Math.max(initial.height - localDy, minH);
+        const dw = newWidth - initial.width;
+        const dh = newHeight - initial.height;
+        localShiftX = -dw * (1 - anchorX);
+        localShiftY = -dh * (1 - anchorY);
+        break;
+      }
+      default:
+        break;
     }
-    case "n": {
-      newHeight = Math.max(initial.height - localDy, minH);
-      const actualChange = newHeight - initial.height;
-      localShiftY = -actualChange * anchorY;
-      break;
-    }
-    case "se": {
-      newWidth = Math.max(initial.width + localDx, minW);
-      newHeight = Math.max(initial.height + localDy, minH);
-      const dw = newWidth - initial.width;
-      const dh = newHeight - initial.height;
-      localShiftX = dw * (1 - anchorX);
-      localShiftY = dh * (1 - anchorY);
-      break;
-    }
-    case "sw": {
-      newWidth = Math.max(initial.width - localDx, minW);
-      newHeight = Math.max(initial.height + localDy, minH);
-      const dw = newWidth - initial.width;
-      const dh = newHeight - initial.height;
-      localShiftX = -dw * anchorX;
-      localShiftY = dh * (1 - anchorY);
-      break;
-    }
-    case "ne": {
-      newWidth = Math.max(initial.width + localDx, minW);
-      newHeight = Math.max(initial.height - localDy, minH);
-      const dw = newWidth - initial.width;
-      const dh = newHeight - initial.height;
-      localShiftX = dw * (1 - anchorX);
-      localShiftY = -dh * anchorY;
-      break;
-    }
-    case "nw": {
-      newWidth = Math.max(initial.width - localDx, minW);
-      newHeight = Math.max(initial.height - localDy, minH);
-      const dw = newWidth - initial.width;
-      const dh = newHeight - initial.height;
-      localShiftX = -dw * anchorX;
-      localShiftY = -dh * anchorY;
-      break;
-    }
-    default:
-      break;
   }
 
   // Rotate local shift back into canvas world coordinate space
@@ -296,13 +351,42 @@ export function resizeElement(
     return element;
   }
 
+  const isCorner = handle === "nw" || handle === "ne" || handle === "se" || handle === "sw";
+  const shouldPreserveAspect =
+    options.preserveAspect ??
+    (isCorner && (element.type === "image" || element.type === "logo" || element.type === "text"));
+
   const updatedTransform = calculateResizeTransform(
     element.transform,
     handle,
     deltaX,
     deltaY,
-    options
+    {
+      ...options,
+      preserveAspect: shouldPreserveAspect,
+    }
   );
+
+  // If resizing a text element via corner handle, scale fontSize proportionally
+  if (element.type === "text" && isCorner) {
+    const textEl = element as TextElement;
+    const initialWidth = element.transform.width;
+    const initialHeight = element.transform.height;
+    if (initialWidth > 0 && initialHeight > 0) {
+      const widthRatio = updatedTransform.width / initialWidth;
+      const heightRatio = updatedTransform.height / initialHeight;
+      const scaleRatio = shouldPreserveAspect
+        ? widthRatio
+        : Math.min(widthRatio, heightRatio);
+      const initialFontSize = textEl.fontSize || 32;
+      const newFontSize = Math.max(8, Math.min(500, Math.round(initialFontSize * scaleRatio)));
+      return {
+        ...textEl,
+        fontSize: newFontSize,
+        transform: updatedTransform,
+      };
+    }
+  }
 
   return {
     ...element,

@@ -66,6 +66,20 @@ export interface TimelinePanelProps {
   defaultExpandAll?: boolean;
   /** Callback fired when currentTime changes during scrubbing/seeking, passing updated time and evaluated scene */
   onTimeChange?: (time: number, evaluatedScene?: Scene) => void;
+  /** Callback fired when layer visibility toggle is clicked */
+  onToggleVisibility?: (elementId: string) => void;
+  /** Callback fired when layer lock toggle is clicked */
+  onToggleLock?: (elementId: string) => void;
+  /** Callback fired when an element is updated (e.g. keyframes, timing) */
+  onUpdateElement?: (elementId: string, updates: Partial<MotionElement>) => void;
+  /** Callback fired when a keyframe is added */
+  onAddKeyframe?: (elementId: string, property: AnimatableProperty, time: number) => void;
+  /** Callback fired when a keyframe is deleted */
+  onDeleteKeyframe?: (elementId: string, keyframeId: string) => void;
+  /** Callback fired when a keyframe is moved */
+  onMoveKeyframe?: (elementId: string, keyframeId: string, newTime: number) => void;
+  /** Callback fired when layer timing is changed */
+  onUpdateLayerTiming?: (elementId: string, startTime: number, duration: number) => void;
 }
 
 /**
@@ -101,5 +115,8 @@ export interface KeyframeNodeProps {
   pixelsPerSecond: number;
   isSelected?: boolean;
   propertyName?: string;
+  fps?: number;
   onClick?: (e: React.MouseEvent) => void;
+  onMoveKeyframe?: (keyframeId: string, newTime: number) => void;
+  onCommitMove?: (keyframeId: string, finalTime: number) => void;
 }

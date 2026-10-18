@@ -1,5 +1,16 @@
 "use client";
 
+/**
+ * MOTION-BOT — Master Editor Shell
+ * Integrates:
+ * - Stage Canvas Viewport (EditorCanvas)
+ * - Visual Timeline Dock (TimelinePanel)
+ * - Context-Aware Inspector (CanvasInspector)
+ * - MotionBot AI Workspace (MotionBotAIWorkspace)
+ * - Project History (Undo / Redo)
+ * Phase 8.1: AI Prompt -> Editor Integration
+ */
+
 import * as React from "react";
 import Link from "next/link";
 import {
@@ -10,121 +21,467 @@ import {
   Square,
   Image as ImageIcon,
   Sparkles,
-  Play,
-  Pause,
-  SkipBack,
-  SkipForward,
   RotateCcw,
   RotateCw,
-  Repeat,
   Download,
   Share2,
-  Eye,
-  EyeOff,
-  Lock,
-  Unlock,
   Sliders,
-  ZoomIn,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Panel, PanelHeader, PanelContent } from "@/components/ui/panel";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Divider } from "@/components/ui/divider";
-import { NumberInput, Input } from "@/components/ui/input";
-import { Slider } from "@/components/ui/slider";
-import { Select } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { EditorCanvas } from "@/components/editor/editor-canvas";
+import { CanvasInspector } from "@/components/editor/canvas-inspector";
+import { MotionBotAIWorkspace } from "@/components/editor/ai-workspace";
+import { SceneBar } from "@/components/editor/scene-bar";
+import { AssetPanel } from "@/components/editor/asset-panel";
+import { TimelinePanel } from "@/components/timeline/timeline-panel";
+import { ExportDialog } from "@/components/editor/export-dialog";
+import { createSampleProject } from "@/services/project/sample-project";
+import {
+  createInitialEditorState,
+  getActiveScene,
+  selectElementInState,
+  setViewportZoom,
+  fitCanvasToViewport,
+  updateElementInActiveScene,
+  toggleElementLockInActiveScene,
+  toggleElementVisibilityInActiveScene,
+  deleteElementInActiveScene,
+  duplicateElementInActiveScene,
+  reorderElementInActiveScene,
+  addSceneToEditor,
+  selectSceneInEditor,
+  renameSceneInEditor,
+  duplicateSceneInEditor,
+  deleteSceneInEditor,
+  reorderScenesInEditor,
+  addAssetToEditor,
+  removeAssetFromEditor,
+  addAssetElementToActiveScene,
+} from "@/services/editor/editor-state";
+import { AutosaveManager } from "@/services/storage/autosave-manager";
+import { syncPropertyWithKeyframes } from "@/services/timeline";
+import { defaultTimelineManager } from "@/timeline";
+import { AnimatableProperty } from "@/types/animation";
+import { Project } from "@/types/project";
+import { EditorState, EditorTool } from "@/types/editor";
+import { MotionElement } from "@/types/element";
+import { SceneBackground } from "@/types/scene";
+import { Asset } from "@/types/asset";
 import { cn } from "@/lib/utils";
 
 export interface EditorShellProps {
   projectTitle?: string;
+  initialProject?: Project;
 }
-
-interface TimelineTrack {
-  id: string;
-  name: string;
-  type: "text" | "shape" | "media" | "mockup";
-  color: string;
-  startSec: number;
-  durationSec: number;
-  keyframes: number[];
-  visible: boolean;
-  locked: boolean;
-}
-
-const SAMPLE_TRACKS: TimelineTrack[] = [
-  {
-    id: "track-1",
-    name: "Hero Headline Text",
-    type: "text",
-    color: "#6366F1",
-    startSec: 0.5,
-    durationSec: 4.5,
-    keyframes: [0.5, 1.2, 4.5],
-    visible: true,
-    locked: false,
-  },
-  {
-    id: "track-2",
-    name: "Callout Badge Shape",
-    type: "shape",
-    color: "#10B981",
-    startSec: 1.0,
-    durationSec: 3.5,
-    keyframes: [1.0, 1.8, 4.0],
-    visible: true,
-    locked: false,
-  },
-  {
-    id: "track-3",
-    name: "Device Frame Mockup",
-    type: "mockup",
-    color: "#F59E0B",
-    startSec: 0.0,
-    durationSec: 5.0,
-    keyframes: [0.0, 0.8, 3.2, 5.0],
-    visible: true,
-    locked: false,
-  },
-  {
-    id: "track-4",
-    name: "Background Backdrop",
-    type: "media",
-    color: "#64748B",
-    startSec: 0.0,
-    durationSec: 5.0,
-    keyframes: [0.0, 5.0],
-    visible: true,
-    locked: true,
-  },
-];
 
 export function EditorShell({
-  projectTitle = "SaaS Product Launch Reel",
+  projectTitle,
+  initialProject,
 }: EditorShellProps) {
-  // Visual states only for Phase 2.6
-  const [activeTool, setActiveTool] = React.useState<string>("select");
-  const [zoomLevel, setZoomLevel] = React.useState<string>("fit");
-  const [isPlaying, setIsPlaying] = React.useState(false);
-  const [selectedLayerId, setSelectedLayerId] = React.useState<string>("track-1");
-  const [activeInspectorTab, setActiveInspectorTab] = React.useState("transform");
-  const [tracks, setTracks] = React.useState<TimelineTrack[]>(SAMPLE_TRACKS);
-  const [currentTime, setCurrentTime] = React.useState(1.4); // Current visual playhead time in seconds
+  // 1. Single Canonical Editor & Project State (One Source of Truth)
+  const [editorState, setEditorState] = React.useState<EditorState>(() => {
+    const proj = initialProject || createSampleProject();
+    return createInitialEditorState(proj);
+  });
+  const project = editorState.project;
 
-  const totalDurationSec = 5.0;
-  const playheadPercent = (currentTime / totalDurationSec) * 100;
+  const [history, setHistory] = React.useState<Project[]>([]);
+  const [future, setFuture] = React.useState<Project[]>([]);
 
-  const toggleTrackVisibility = (id: string) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, visible: !t.visible } : t))
-    );
+  // Push history snapshot for discrete or committed changes
+  const pushHistory = React.useCallback((prevProject: Project) => {
+    setHistory((prev) => [...prev, prevProject]);
+    setFuture([]);
+  }, []);
+
+  // Autosave Manager Integration (Debounced storage commits)
+  const [saveStatus, setSaveStatus] = React.useState<"saved" | "saving" | "unsaved" | "error">("saved");
+  const autosaveManagerRef = React.useRef<AutosaveManager | null>(null);
+  const lastProjectRef = React.useRef<Project>(initialProject || project);
+
+  React.useEffect(() => {
+    const manager = new AutosaveManager({
+      debounceMs: 1000,
+      onStatusChange: (status) => setSaveStatus(status.state),
+    });
+    manager.loadProject(editorState.project);
+    autosaveManagerRef.current = manager;
+
+    return () => {
+      manager.dispose();
+    };
+    // Mount-only initialization for AutosaveManager baseline
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Continuous autosave change listener on editorState.project
+  React.useEffect(() => {
+    if (autosaveManagerRef.current && editorState.project !== lastProjectRef.current) {
+      lastProjectRef.current = editorState.project;
+      autosaveManagerRef.current.notifyChange(editorState.project);
+    }
+  }, [editorState.project]);
+
+  // Keyboard shortcut: Ctrl+S / Cmd+S manual save
+  React.useEffect(() => {
+    const handleSaveShortcut = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void autosaveManagerRef.current?.saveNow();
+      }
+    };
+    window.addEventListener("keydown", handleSaveShortcut);
+    return () => window.removeEventListener("keydown", handleSaveShortcut);
+  }, []);
+
+  // Browser beforeunload protection if unsaved changes exist
+  React.useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (saveStatus === "unsaved" || saveStatus === "saving") {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [saveStatus]);
+
+  // 2. Panel & Layout States
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = React.useState(true);
+  const [activeRightTab, setActiveRightTab] = React.useState<"ai" | "properties" | "assets">("ai");
+  const [zoomSelection, setZoomSelection] = React.useState<string>("fit");
+  const [currentTime, setCurrentTime] = React.useState<number>(0);
+  const [isExportDialogOpen, setIsExportDialogOpen] = React.useState(false);
+
+  // Active scene and selected element derived from live editor state
+  const activeScene = getActiveScene(editorState) || project.scenes[0];
+  const selectedElementId = editorState.selectedElementIds[0] || null;
+  const selectedElement =
+    activeScene?.elements.find((el) => el.id === selectedElementId) || null;
+
+  const displayTitle = projectTitle || project.name || "Untitled Motion Comp 01";
+
+  // 3. Undo / Redo Handlers
+  const handleUndo = React.useCallback(() => {
+    if (history.length === 0) return;
+    const previous = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, prev.length - 1));
+    setFuture((prev) => [editorState.project, ...prev]);
+    setEditorState((prev) => ({
+      ...prev,
+      project: previous,
+    }));
+    autosaveManagerRef.current?.notifyChange(previous);
+  }, [history, editorState.project]);
+
+  const handleRedo = React.useCallback(() => {
+    if (future.length === 0) return;
+    const next = future[0];
+    setFuture((prev) => prev.slice(1));
+    setHistory((prev) => [...prev, editorState.project]);
+    setEditorState((prev) => ({
+      ...prev,
+      project: next,
+    }));
+    autosaveManagerRef.current?.notifyChange(next);
+  }, [future, editorState.project]);
+
+  // Canvas commit for single-step drag / resize / rotate undo history
+  const handleCanvasCommit = React.useCallback((previousProject: Project) => {
+    pushHistory(previousProject);
+    autosaveManagerRef.current?.notifyChange(editorState.project);
+  }, [pushHistory, editorState.project]);
+
+  // 4. Layer Manipulation Actions
+  const handleDeleteElement = React.useCallback((elementId?: string) => {
+    const targetId = elementId || editorState.selectedElementIds[0];
+    if (!targetId) return;
+    pushHistory(editorState.project);
+    setEditorState((prev) => deleteElementInActiveScene(prev, targetId));
+    autosaveManagerRef.current?.notifyChange(editorState.project);
+  }, [editorState.selectedElementIds, editorState.project, pushHistory]);
+
+  const handleDuplicateElement = React.useCallback((elementId?: string) => {
+    const targetId = elementId || editorState.selectedElementIds[0];
+    if (!targetId) return;
+    pushHistory(editorState.project);
+    setEditorState((prev) => duplicateElementInActiveScene(prev, targetId));
+    autosaveManagerRef.current?.notifyChange(editorState.project);
+  }, [editorState.selectedElementIds, editorState.project, pushHistory]);
+
+  const handleReorderElement = React.useCallback(
+    (elementId: string, action: "bringForward" | "sendBackward" | "bringToFront" | "sendToBack") => {
+      pushHistory(editorState.project);
+      setEditorState((prev) => reorderElementInActiveScene(prev, elementId, action));
+      autosaveManagerRef.current?.notifyChange(editorState.project);
+    },
+    [editorState.project, pushHistory]
+  );
+
+  const handleToggleVisibility = React.useCallback((elementId: string) => {
+    pushHistory(editorState.project);
+    setEditorState((prev) => toggleElementVisibilityInActiveScene(prev, elementId));
+    autosaveManagerRef.current?.notifyChange(editorState.project);
+  }, [editorState.project, pushHistory]);
+
+  const handleLockToggle = React.useCallback((elementId: string, locked?: boolean) => {
+    pushHistory(editorState.project);
+    setEditorState((prev) => toggleElementLockInActiveScene(prev, elementId, locked));
+    autosaveManagerRef.current?.notifyChange(editorState.project);
+  }, [editorState.project, pushHistory]);
+
+  // 4b. Scene Manipulation Handlers
+  const handleSelectScene = React.useCallback(
+    (sceneId: string) => {
+      if (sceneId === editorState.activeSceneId) return;
+      defaultTimelineManager.stop();
+      setCurrentTime(0);
+      setEditorState((prev) => selectSceneInEditor(prev, sceneId));
+      autosaveManagerRef.current?.notifyChange(editorState.project);
+    },
+    [editorState.activeSceneId, editorState.project]
+  );
+
+  const handleCreateScene = React.useCallback(() => {
+    pushHistory(editorState.project);
+    defaultTimelineManager.stop();
+    setCurrentTime(0);
+    setEditorState((prev) => addSceneToEditor(prev));
+    autosaveManagerRef.current?.notifyChange(editorState.project);
+  }, [editorState.project, pushHistory]);
+
+  const handleRenameScene = React.useCallback(
+    (sceneId: string, newName: string) => {
+      pushHistory(editorState.project);
+      setEditorState((prev) => renameSceneInEditor(prev, sceneId, newName));
+      autosaveManagerRef.current?.notifyChange(editorState.project);
+    },
+    [editorState.project, pushHistory]
+  );
+
+  const handleDuplicateScene = React.useCallback(
+    (sceneId: string) => {
+      pushHistory(editorState.project);
+      defaultTimelineManager.stop();
+      setCurrentTime(0);
+      setEditorState((prev) => duplicateSceneInEditor(prev, sceneId));
+      autosaveManagerRef.current?.notifyChange(editorState.project);
+    },
+    [editorState.project, pushHistory]
+  );
+
+  const handleDeleteScene = React.useCallback(
+    (sceneId: string) => {
+      if (editorState.project.scenes.length <= 1) return;
+      pushHistory(editorState.project);
+      defaultTimelineManager.stop();
+      setCurrentTime(0);
+      setEditorState((prev) => deleteSceneInEditor(prev, sceneId));
+      autosaveManagerRef.current?.notifyChange(editorState.project);
+    },
+    [editorState.project, pushHistory]
+  );
+
+  const handleReorderScenes = React.useCallback(
+    (fromIndex: number, toIndex: number) => {
+      pushHistory(editorState.project);
+      setEditorState((prev) => reorderScenesInEditor(prev, fromIndex, toIndex));
+      autosaveManagerRef.current?.notifyChange(editorState.project);
+    },
+    [editorState.project, pushHistory]
+  );
+
+  // 4c. Asset Manipulation Handlers
+  const handleAddAssetToProject = React.useCallback(
+    (asset: Asset) => {
+      pushHistory(editorState.project);
+      setEditorState((prev) => addAssetToEditor(prev, asset));
+      autosaveManagerRef.current?.notifyChange(editorState.project);
+    },
+    [editorState.project, pushHistory]
+  );
+
+  const handleRemoveAssetFromProject = React.useCallback(
+    (assetId: string) => {
+      pushHistory(editorState.project);
+      setEditorState((prev) => removeAssetFromEditor(prev, assetId));
+      autosaveManagerRef.current?.notifyChange(editorState.project);
+    },
+    [editorState.project, pushHistory]
+  );
+
+  const handleAddAssetToCanvas = React.useCallback(
+    (assetId: string) => {
+      pushHistory(editorState.project);
+      setEditorState((prev) => addAssetElementToActiveScene(prev, assetId));
+      setActiveRightTab("properties");
+      if (!isRightSidebarOpen) {
+        setIsRightSidebarOpen(true);
+      }
+      autosaveManagerRef.current?.notifyChange(editorState.project);
+    },
+    [editorState.project, isRightSidebarOpen, pushHistory]
+  );
+
+  // Global keyboard shortcuts for Undo / Redo / Delete / Duplicate
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        handleRedo();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d" && editorState.selectedElementIds.length > 0) {
+        e.preventDefault();
+        handleDuplicateElement();
+      } else if ((e.code === "Delete" || e.code === "Backspace") && editorState.selectedElementIds.length > 0) {
+        e.preventDefault();
+        handleDeleteElement();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleUndo, handleRedo, handleDuplicateElement, handleDeleteElement, editorState.selectedElementIds]);
+
+  // 5. Applying AI Generated Plan to Project
+  const handleApplyAIProject = React.useCallback(
+    async (newProject: Project) => {
+      // Record undo snapshot
+      pushHistory(editorState.project);
+
+      setEditorState((prev) => {
+        const nextState = createInitialEditorState(
+          newProject,
+          prev.viewport.containerWidth,
+          prev.viewport.containerHeight
+        );
+        // Automatically select first element of the first scene if available
+        const firstScene = newProject.scenes[0];
+        const firstElem = firstScene?.elements[0];
+        if (firstElem) {
+          return selectElementInState(nextState, firstElem.id);
+        }
+        return nextState;
+      });
+
+      lastProjectRef.current = newProject;
+      autosaveManagerRef.current?.loadProject(newProject);
+      await autosaveManagerRef.current?.saveNow();
+
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("projectId", newProject.id);
+        window.history.replaceState(null, "", url.toString());
+      }
+    },
+    [editorState.project, pushHistory]
+  );
+
+  // 6. Tool Selection Handler
+  const handleSelectTool = (tool: EditorTool) => {
+    setEditorState((prev) => ({ ...prev, activeTool: tool }));
+    if (tool === "image") {
+      setIsRightSidebarOpen(true);
+      setActiveRightTab("assets");
+    }
   };
 
-  const toggleTrackLock = (id: string) => {
-    setTracks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, locked: !t.locked } : t))
+  // 7. Viewport Zoom Selector
+  const handleZoomChange = (value: string) => {
+    setZoomSelection(value);
+    if (value === "fit") {
+      setEditorState(fitCanvasToViewport);
+    } else if (value === "50%") {
+      setEditorState((prev) => setViewportZoom(prev, 0.5));
+    } else if (value === "100%") {
+      setEditorState((prev) => setViewportZoom(prev, 1.0));
+    }
+  };
+
+  // 8. Element Selection Handlers
+  const handleSelectElement = (elementId: string) => {
+    setEditorState((prev) => selectElementInState(prev, elementId));
+    // Switch to properties tab when user clicks an element
+    setActiveRightTab("properties");
+    if (!isRightSidebarOpen) {
+      setIsRightSidebarOpen(true);
+    }
+  };
+
+  // 9. Element Updates from Inspector
+  const handleUpdateElement = (updates: Partial<MotionElement>) => {
+    if (!selectedElement) return;
+    pushHistory(editorState.project);
+
+    let updatedElement: MotionElement = { ...selectedElement, ...updates } as unknown as MotionElement;
+
+    // Synchronize animated properties with keyframes at current playhead time
+    if (updates.transform) {
+      for (const [key, val] of Object.entries(updates.transform)) {
+        if (
+          val !== undefined &&
+          ["x", "y", "scaleX", "scaleY", "rotation", "width", "height"].includes(key)
+        ) {
+          updatedElement = syncPropertyWithKeyframes(
+            updatedElement,
+            key as AnimatableProperty,
+            val as number,
+            currentTime,
+            project.fps
+          );
+        }
+      }
+    }
+
+    if (updates.appearance?.opacity !== undefined) {
+      updatedElement = syncPropertyWithKeyframes(
+        updatedElement,
+        "opacity",
+        updates.appearance.opacity,
+        currentTime,
+        project.fps
+      );
+    }
+
+    setEditorState((prev) =>
+      updateElementInActiveScene(prev, selectedElement.id, updatedElement)
     );
+    autosaveManagerRef.current?.notifyChange(editorState.project);
+  };
+
+  const handleUpdateSceneBackground = (bg: SceneBackground) => {
+    if (!activeScene) return;
+    pushHistory(editorState.project);
+    setEditorState((prev) => {
+      const updatedScenes = prev.project.scenes.map((s) =>
+        s.id === activeScene.id ? { ...s, background: bg } : s
+      );
+      return {
+        ...prev,
+        project: {
+          ...prev.project,
+          scenes: updatedScenes,
+        },
+      };
+    });
+    autosaveManagerRef.current?.notifyChange(editorState.project);
   };
 
   return (
@@ -140,20 +497,70 @@ export function EditorShell({
           </Link>
 
           <div className="flex items-center gap-2.5">
-            <span className="text-small font-semibold text-text-primary tracking-tight">
-              {projectTitle}
+            <span className="text-small font-semibold text-text-primary tracking-tight truncate max-w-[240px]">
+              {displayTitle}
             </span>
             <span className="rounded-xs bg-surface-elevated border border-border px-1.5 py-0.2 text-[10px] font-mono text-text-muted">
-              1920 × 1080 • 60 FPS
+              {project.width} × {project.height} • {project.fps} FPS
             </span>
           </div>
 
           <Divider orientation="vertical" className="h-4 hidden sm:inline-block" />
 
-          {/* Visual Save Status Placeholder */}
-          <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-mono text-text-muted">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            <span>Saved</span>
+          {/* Visual Save Status */}
+          <div
+            className="hidden sm:flex items-center gap-1.5 text-[11px] font-mono cursor-pointer select-none"
+            onClick={() => {
+              if (saveStatus === "unsaved" || saveStatus === "error") {
+                void autosaveManagerRef.current?.saveNow();
+              }
+            }}
+            title={
+              saveStatus === "error"
+                ? "Save failed. Click to retry."
+                : saveStatus === "unsaved"
+                ? "Unsaved changes. Click to save now (⌘S)."
+                : saveStatus === "saving"
+                ? "Saving changes to storage..."
+                : "All changes saved to storage."
+            }
+          >
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full transition-colors",
+                saveStatus === "saved" && "bg-emerald-500",
+                saveStatus === "saving" && "bg-amber-500 animate-pulse",
+                saveStatus === "unsaved" && "bg-amber-400",
+                saveStatus === "error" && "bg-rose-500"
+              )}
+            />
+            <span
+              className={cn(
+                "transition-colors",
+                saveStatus === "error" && "text-rose-400 font-semibold",
+                saveStatus === "unsaved" && "text-amber-300/90",
+                saveStatus === "saving" && "text-amber-400",
+                saveStatus === "saved" && "text-text-muted"
+              )}
+            >
+              {saveStatus === "saving"
+                ? "Saving..."
+                : saveStatus === "unsaved"
+                ? "Unsaved changes"
+                : saveStatus === "error"
+                ? "Save failed"
+                : "Saved"}
+            </span>
+            {saveStatus === "error" && (
+              <button
+                type="button"
+                onClick={() => void autosaveManagerRef.current?.saveNow()}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-sans hover:bg-rose-500/30 transition-colors cursor-pointer"
+                title="Click to retry saving project"
+              >
+                Retry Save
+              </button>
+            )}
           </div>
         </div>
 
@@ -161,12 +568,24 @@ export function EditorShell({
         <div className="hidden md:flex items-center gap-2">
           <div className="flex items-center">
             <Tooltip content="Undo" shortcut="⌘Z">
-              <Button variant="ghost" size="icon-sm" disabled aria-label="Undo">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={history.length === 0}
+                onClick={handleUndo}
+                aria-label="Undo"
+              >
                 <RotateCcw className="h-3.5 w-3.5" />
               </Button>
             </Tooltip>
             <Tooltip content="Redo" shortcut="⇧⌘Z">
-              <Button variant="ghost" size="icon-sm" disabled aria-label="Redo">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={future.length === 0}
+                onClick={handleRedo}
+                aria-label="Redo"
+              >
                 <RotateCw className="h-3.5 w-3.5" />
               </Button>
             </Tooltip>
@@ -177,8 +596,8 @@ export function EditorShell({
           {/* Viewport Zoom Selector */}
           <SegmentedControl
             size="sm"
-            value={zoomLevel}
-            onValueChange={setZoomLevel}
+            value={zoomSelection}
+            onValueChange={handleZoomChange}
             options={[
               { value: "50%", label: "50%" },
               { value: "fit", label: "Fit" },
@@ -187,27 +606,51 @@ export function EditorShell({
           />
         </div>
 
-        {/* Right: Preview & Export Placeholders */}
+        {/* Right: AI Panel Toggle & Actions */}
         <div className="flex items-center gap-2">
-          <Tooltip content="Preview resolution">
-            <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-xs border border-border bg-surface-elevated text-[11px] font-mono text-text-secondary">
-              <span>Full (1080p)</span>
-            </div>
-          </Tooltip>
+          {/* Prominent MotionBot AI Toggle Button */}
+          <Button
+            variant={isRightSidebarOpen && activeRightTab === "ai" ? "secondary" : "ghost"}
+            size="sm"
+            className={cn(
+              "gap-1.5 text-xs font-semibold transition-all",
+              isRightSidebarOpen && activeRightTab === "ai"
+                ? "border-accent/40 bg-accent/15 text-accent shadow-xs"
+                : "text-text-primary hover:text-accent"
+            )}
+            onClick={() => {
+              if (isRightSidebarOpen && activeRightTab === "ai") {
+                setIsRightSidebarOpen(false);
+              } else {
+                setIsRightSidebarOpen(true);
+                setActiveRightTab("ai");
+              }
+            }}
+          >
+            <Sparkles className="h-3.5 w-3.5 text-accent" />
+            <span>MotionBot AI</span>
+          </Button>
+
+          <Divider orientation="vertical" className="h-4 hidden sm:inline-block" />
 
           <Button variant="ghost" size="sm" className="gap-1.5 text-text-secondary hidden sm:inline-flex">
             <Share2 className="h-3.5 w-3.5" />
             <span>Share</span>
           </Button>
 
-          <Button variant="primary" size="sm" className="gap-1.5">
+          <Button
+            variant="primary"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setIsExportDialogOpen(true)}
+          >
             <Download className="h-3.5 w-3.5" />
             <span>Export</span>
           </Button>
         </div>
       </header>
 
-      {/* 2. MAIN WORKSPACE (Tool Panel + Canvas Area + Properties Panel) */}
+      {/* 2. MAIN WORKSPACE (Left Tool Panel + Center Canvas Area + Right Sidebar) */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* LEFT TOOL PANEL */}
         <aside
@@ -216,11 +659,11 @@ export function EditorShell({
         >
           <Tooltip content="Select Tool" shortcut="V" side="right">
             <Button
-              variant={activeTool === "select" ? "secondary" : "ghost"}
+              variant={editorState.activeTool === "select" ? "secondary" : "ghost"}
               size="icon-sm"
-              onClick={() => setActiveTool("select")}
+              onClick={() => handleSelectTool("select")}
               aria-label="Select Tool"
-              className={cn(activeTool === "select" && "border-accent text-accent")}
+              className={cn(editorState.activeTool === "select" && "border-accent text-accent")}
             >
               <MousePointer className="h-4 w-4" />
             </Button>
@@ -228,11 +671,11 @@ export function EditorShell({
 
           <Tooltip content="Text Tool" shortcut="T" side="right">
             <Button
-              variant={activeTool === "text" ? "secondary" : "ghost"}
+              variant={editorState.activeTool === "text" ? "secondary" : "ghost"}
               size="icon-sm"
-              onClick={() => setActiveTool("text")}
+              onClick={() => handleSelectTool("text")}
               aria-label="Text Tool"
-              className={cn(activeTool === "text" && "border-accent text-accent")}
+              className={cn(editorState.activeTool === "text" && "border-accent text-accent")}
             >
               <Type className="h-4 w-4" />
             </Button>
@@ -240,11 +683,11 @@ export function EditorShell({
 
           <Tooltip content="Shape Tool" shortcut="R" side="right">
             <Button
-              variant={activeTool === "shape" ? "secondary" : "ghost"}
+              variant={editorState.activeTool === "shape" ? "secondary" : "ghost"}
               size="icon-sm"
-              onClick={() => setActiveTool("shape")}
+              onClick={() => handleSelectTool("shape")}
               aria-label="Shape Tool"
-              className={cn(activeTool === "shape" && "border-accent text-accent")}
+              className={cn(editorState.activeTool === "shape" && "border-accent text-accent")}
             >
               <Square className="h-4 w-4" />
             </Button>
@@ -252,25 +695,33 @@ export function EditorShell({
 
           <Tooltip content="Image / Asset Tool" shortcut="I" side="right">
             <Button
-              variant={activeTool === "image" ? "secondary" : "ghost"}
+              variant={editorState.activeTool === "image" ? "secondary" : "ghost"}
               size="icon-sm"
-              onClick={() => setActiveTool("image")}
+              onClick={() => handleSelectTool("image")}
               aria-label="Image Tool"
-              className={cn(activeTool === "image" && "border-accent text-accent")}
+              className={cn(editorState.activeTool === "image" && "border-accent text-accent")}
             >
               <ImageIcon className="h-4 w-4" />
             </Button>
           </Tooltip>
 
-          <Tooltip content="Logo & Brand Tool" shortcut="L" side="right">
+          <Divider className="w-6 my-1" />
+
+          {/* Quick AI Trigger from Tool Panel */}
+          <Tooltip content="MotionBot AI Workspace" shortcut="AI" side="right">
             <Button
-              variant={activeTool === "logo" ? "secondary" : "ghost"}
+              variant={isRightSidebarOpen && activeRightTab === "ai" ? "secondary" : "ghost"}
               size="icon-sm"
-              onClick={() => setActiveTool("logo")}
-              aria-label="Logo Tool"
-              className={cn(activeTool === "logo" && "border-accent text-accent")}
+              onClick={() => {
+                setIsRightSidebarOpen(true);
+                setActiveRightTab("ai");
+              }}
+              aria-label="Open MotionBot AI"
+              className={cn(
+                isRightSidebarOpen && activeRightTab === "ai" && "border-accent text-accent bg-accent/15"
+              )}
             >
-              <Sparkles className="h-4 w-4" />
+              <Sparkles className="h-4 w-4 text-accent" />
             </Button>
           </Tooltip>
 
@@ -278,529 +729,212 @@ export function EditorShell({
 
           <Tooltip content="Hand / Canvas Pan" shortcut="H" side="right">
             <Button
-              variant={activeTool === "hand" ? "secondary" : "ghost"}
+              variant={editorState.activeTool === "hand" ? "secondary" : "ghost"}
               size="icon-sm"
-              onClick={() => setActiveTool("hand")}
+              onClick={() => handleSelectTool("hand")}
               aria-label="Hand Tool"
-              className={cn(activeTool === "hand" && "border-accent text-accent")}
+              className={cn(editorState.activeTool === "hand" && "border-accent text-accent")}
             >
               <Hand className="h-4 w-4" />
             </Button>
           </Tooltip>
         </aside>
 
-        {/* CANVAS AREA */}
+        {/* CENTER CANVAS WORKSPACE */}
         <main
           aria-label="Canvas Workspace"
-          className="flex-1 bg-[#08090C] relative flex items-center justify-center p-6 overflow-hidden select-none"
+          className="flex-1 bg-[#08090C] relative flex items-center justify-center overflow-hidden select-none"
         >
-          {/* Subtle Grid pattern in workspace background */}
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#171A23_1px,transparent_1px),linear-gradient(to_bottom,#171A23_1px,transparent_1px)] bg-[size:28px_28px] opacity-40 pointer-events-none" />
+          {/* Subtle Grid Pattern */}
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#171A23_1px,transparent_1px),linear-gradient(to_bottom,#171A23_1px,transparent_1px)] bg-[size:28px_28px] opacity-35 pointer-events-none" />
 
-          {/* Canvas Stage Viewport Frame (16:9 1920 × 1080 representation) */}
-          <div
-            className="relative aspect-video w-full max-w-4xl rounded-xs border border-border-active bg-surface shadow-floating flex flex-col items-center justify-center overflow-hidden transition-all duration-normal"
-            style={{
-              transform: zoomLevel === "50%" ? "scale(0.85)" : zoomLevel === "100%" ? "scale(1.15)" : "scale(1)",
-            }}
-          >
-            {/* Viewport Header Bar */}
-            <div className="absolute top-2 left-3 right-3 flex items-center justify-between text-[10px] font-mono text-text-muted pointer-events-none z-10">
-              <div className="flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-                <span>CANVAS STAGE • 1920 × 1080 (16:9)</span>
-              </div>
-              <span>X: 0.0 | Y: 0.0</span>
+          {/* Real Interactive Stage Canvas */}
+          <EditorCanvas
+            editorState={editorState}
+            onStateChange={setEditorState}
+            onCommitChange={handleCanvasCommit}
+            onDeleteSelected={handleDeleteElement}
+            onDuplicateSelected={handleDuplicateElement}
+            assets={project.assets}
+            currentTime={currentTime}
+            className="w-full h-full"
+          />
+
+          {/* Floating Expand Sidebar Button when Right Panel is Closed */}
+          {!isRightSidebarOpen && (
+            <div className="absolute top-3 right-3 flex items-center gap-1.5 z-20">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setIsRightSidebarOpen(true);
+                  setActiveRightTab("ai");
+                }}
+                className="gap-1.5 shadow-floating border-accent/40 bg-surface/90 backdrop-blur-sm text-accent text-xs"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>MotionBot AI</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => {
+                  setIsRightSidebarOpen(true);
+                  setActiveRightTab("properties");
+                }}
+                aria-label="Open Inspector"
+                className="shadow-subtle border border-border bg-surface/90 backdrop-blur-sm"
+              >
+                <Sliders className="h-3.5 w-3.5" />
+              </Button>
             </div>
-
-            {/* Title Safe Margins Guide Line */}
-            <div className="absolute inset-8 border border-dashed border-border-subtle/50 rounded-xs pointer-events-none" />
-
-            {/* Visual Stage Content Elements (Visual representation only) */}
-            <div className="relative z-10 text-center space-y-3 p-6 max-w-md">
-              <div className="inline-block rounded-xs bg-accent/20 border border-accent/40 text-accent px-2 py-0.5 text-[11px] font-mono tracking-wide uppercase">
-                Scene 01 • Stagger Text Reveal
-              </div>
-              <h2 className="text-h1 font-bold tracking-tight text-text-primary">
-                Next-Gen Analytics Engine
-              </h2>
-              <p className="text-caption text-text-secondary leading-relaxed">
-                Transform natural language descriptions into frame-accurate motion design.
-              </p>
-            </div>
-
-            {/* Selected Layer Bounding Box Indicator */}
-            <div className="absolute inset-12 border border-selection-border border-dashed rounded-xs pointer-events-none">
-              <span className="absolute -top-1.5 -left-1.5 h-3 w-3 rounded-xs border border-selection-border bg-surface" />
-              <span className="absolute -top-1.5 -right-1.5 h-3 w-3 rounded-xs border border-selection-border bg-surface" />
-              <span className="absolute -bottom-1.5 -left-1.5 h-3 w-3 rounded-xs border border-selection-border bg-surface" />
-              <span className="absolute -bottom-1.5 -right-1.5 h-3 w-3 rounded-xs border border-selection-border bg-surface" />
-            </div>
-
-            {/* Bottom Status Tag */}
-            <div className="absolute bottom-2 left-3 text-[10px] font-mono text-text-muted">
-              Active Layer: {tracks.find((t) => t.id === selectedLayerId)?.name}
-            </div>
-          </div>
-
-          {/* Floating Canvas Zoom Overlay in Bottom Right */}
-          <div className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xs border border-border bg-surface/90 px-2 py-1 text-[11px] font-mono text-text-secondary shadow-subtle backdrop-blur-sm">
-            <ZoomIn className="h-3 w-3 text-text-muted" />
-            <span>{zoomLevel === "fit" ? "Fit (100%)" : zoomLevel}</span>
-          </div>
+          )}
         </main>
 
-        {/* RIGHT PROPERTIES PANEL */}
-        <aside
-          aria-label="Properties Panel"
-          className="w-72 border-l border-border bg-surface flex flex-col shrink-0 z-20"
-        >
-          <Panel bordered={false} className="h-full">
-            <PanelHeader
-              title="Properties"
-              icon={<Sliders className="h-3.5 w-3.5 text-accent" />}
-              actions={
-                <span className="text-[10px] font-mono text-text-muted">
-                  Layer #1
-                </span>
-              }
-            />
+        {/* RIGHT SIDEBAR (Collapsible: MotionBot AI Workspace, Assets, or Properties Inspector) */}
+        {isRightSidebarOpen && (
+          <aside
+            aria-label="Right Editor Workspace"
+            className="w-80 md:w-96 border-l border-border bg-surface flex flex-col shrink-0 z-20 overflow-hidden"
+          >
+            {/* Top Switcher Tabs: [ MotionBot AI ] [ Assets ] [ Properties ] */}
+            <div className="h-10 px-2 border-b border-border bg-surface-elevated/40 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("ai")}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-xs transition-colors flex items-center gap-1.5",
+                    activeRightTab === "ai"
+                      ? "bg-accent/20 text-accent border border-accent/30"
+                      : "text-text-secondary hover:text-text-primary"
+                  )}
+                >
+                  <Sparkles className="h-3 w-3" />
+                  <span>AI</span>
+                </button>
 
-            <PanelContent className="p-0 overflow-y-auto">
-              <Tabs
-                value={activeInspectorTab}
-                onValueChange={setActiveInspectorTab}
-                className="w-full"
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("assets")}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium rounded-xs transition-colors flex items-center gap-1.5",
+                    activeRightTab === "assets"
+                      ? "bg-surface-elevated text-text-primary border border-border"
+                      : "text-text-secondary hover:text-text-primary"
+                  )}
+                >
+                  <ImageIcon className="h-3 w-3" />
+                  <span>Assets</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("properties")}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium rounded-xs transition-colors flex items-center gap-1.5",
+                    activeRightTab === "properties"
+                      ? "bg-surface-elevated text-text-primary border border-border"
+                      : "text-text-secondary hover:text-text-primary"
+                  )}
+                >
+                  <Sliders className="h-3 w-3" />
+                  <span>Properties</span>
+                </button>
+              </div>
+
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setIsRightSidebarOpen(false)}
+                aria-label="Collapse Panel"
               >
-                <TabsList className="w-full px-2 border-b border-border bg-surface-elevated/20">
-                  <TabsTrigger value="transform" className="flex-1 text-[11px]">
-                    Transform
-                  </TabsTrigger>
-                  <TabsTrigger value="appearance" className="flex-1 text-[11px]">
-                    Appearance
-                  </TabsTrigger>
-                  <TabsTrigger value="typography" className="flex-1 text-[11px]">
-                    Type
-                  </TabsTrigger>
-                  <TabsTrigger value="animation" className="flex-1 text-[11px]">
-                    Motion
-                  </TabsTrigger>
-                </TabsList>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
 
-                {/* Tab 1: Transform Properties */}
-                <TabsContent value="transform" className="p-3 space-y-3.5 m-0">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Position X
-                      </label>
-                      <NumberInput value={960} unit="px" readOnly />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Position Y
-                      </label>
-                      <NumberInput value={540} unit="px" readOnly />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Width
-                      </label>
-                      <NumberInput value={640} unit="px" readOnly />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Height
-                      </label>
-                      <NumberInput value={220} unit="px" readOnly />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Rotation
-                      </label>
-                      <NumberInput value={0} unit="°" readOnly />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Scale
-                      </label>
-                      <NumberInput value={100} unit="%" readOnly />
-                    </div>
-                  </div>
-
-                  <Divider />
-
-                  <Slider
-                    label="Layer Opacity"
-                    defaultValue={100}
-                    unit="%"
-                    showValue
-                  />
-                </TabsContent>
-
-                {/* Tab 2: Appearance Properties */}
-                <TabsContent value="appearance" className="p-3 space-y-3.5 m-0">
-                  <div>
-                    <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                      Fill Color
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="h-6 w-6 rounded-xs border border-border bg-[#F8FAFC]" />
-                      <Input value="#F8FAFC" readOnly className="font-mono text-xs" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                      Blend Mode
-                    </label>
-                    <Select
-                      defaultValue="normal"
-                      options={[
-                        { value: "normal", label: "Normal" },
-                        { value: "multiply", label: "Multiply" },
-                        { value: "screen", label: "Screen" },
-                        { value: "overlay", label: "Overlay" },
-                      ]}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Border Radius
-                      </label>
-                      <NumberInput value={4} unit="px" readOnly />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Stroke Width
-                      </label>
-                      <NumberInput value={1} unit="px" readOnly />
-                    </div>
-                  </div>
-                </TabsContent>
-
-                {/* Tab 3: Typography Properties */}
-                <TabsContent value="typography" className="p-3 space-y-3.5 m-0">
-                  <div>
-                    <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                      Font Family
-                    </label>
-                    <Select
-                      defaultValue="inter"
-                      options={[
-                        { value: "inter", label: "Inter (System Sans)" },
-                        { value: "mono", label: "JetBrains Mono" },
-                        { value: "serif", label: "Editorial Serif" },
-                      ]}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Font Size
-                      </label>
-                      <NumberInput value={32} unit="px" readOnly />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Line Height
-                      </label>
-                      <NumberInput value={36} unit="px" readOnly />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                      Font Weight
-                    </label>
-                    <Select
-                      defaultValue="700"
-                      options={[
-                        { value: "400", label: "Regular (400)" },
-                        { value: "600", label: "SemiBold (600)" },
-                        { value: "700", label: "Bold (700)" },
-                      ]}
-                    />
-                  </div>
-                </TabsContent>
-
-                {/* Tab 4: Animation Properties */}
-                <TabsContent value="animation" className="p-3 space-y-3.5 m-0">
-                  <div>
-                    <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                      Easing Curve
-                    </label>
-                    <Select
-                      defaultValue="cubic"
-                      options={[
-                        { value: "cubic", label: "Cubic Bezier (0.2, 0, 0, 1)" },
-                        { value: "spring", label: "Physics Spring (Mass 1, Damp 15)" },
-                        { value: "ease-out", label: "Ease Out (Deceleration)" },
-                        { value: "linear", label: "Linear (Mechanical)" },
-                      ]}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Entrance Preset
-                      </label>
-                      <Select
-                        defaultValue="fade-up"
-                        options={[
-                          { value: "fade-up", label: "Fade Up" },
-                          { value: "scale", label: "Scale Zoom" },
-                          { value: "blur", label: "Blur Reveal" },
-                        ]}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">
-                        Stagger Delay
-                      </label>
-                      <NumberInput value={80} unit="ms" readOnly />
-                    </div>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </PanelContent>
-          </Panel>
-        </aside>
+            {/* Panel Body: Active Content */}
+            <div className="flex-1 overflow-hidden">
+              {activeRightTab === "ai" ? (
+                <MotionBotAIWorkspace
+                  project={project}
+                  activeScene={activeScene}
+                  selectedElement={selectedElement}
+                  currentTime={currentTime}
+                  onApplyProject={handleApplyAIProject}
+                  onClose={() => setIsRightSidebarOpen(false)}
+                />
+              ) : activeRightTab === "assets" ? (
+                <AssetPanel
+                  project={project}
+                  onAddAssetToProject={handleAddAssetToProject}
+                  onAddAssetToCanvas={handleAddAssetToCanvas}
+                  onRemoveAssetFromProject={handleRemoveAssetFromProject}
+                  onClose={() => setIsRightSidebarOpen(false)}
+                />
+              ) : (
+                <CanvasInspector
+                  selectedElement={selectedElement}
+                  project={project}
+                  activeScene={activeScene}
+                  onUpdateElement={handleUpdateElement}
+                  onUpdateSceneBackground={handleUpdateSceneBackground}
+                  onLockToggle={handleLockToggle}
+                  onDuplicateElement={handleDuplicateElement}
+                  onDeleteElement={handleDeleteElement}
+                  onReorderElement={handleReorderElement}
+                />
+              )}
+            </div>
+          </aside>
+        )}
       </div>
 
       {/* 3. BOTTOM TIMELINE DOCK */}
       <footer
         aria-label="Timeline Dock"
-        className="h-56 border-t border-border bg-surface flex flex-col shrink-0 z-30 select-none"
+        className="h-64 border-t border-border bg-surface flex flex-col shrink-0 z-30 select-none overflow-hidden"
       >
-        {/* Timeline Transport Header */}
-        <div className="h-9 border-b border-border bg-surface-elevated/40 px-3 flex items-center justify-between shrink-0">
-          {/* Transport playback controls */}
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setCurrentTime(0)}
-              aria-label="Jump to start"
-            >
-              <SkipBack className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="secondary"
-              size="icon-sm"
-              onClick={() => setIsPlaying(!isPlaying)}
-              aria-label={isPlaying ? "Pause" : "Play"}
-              className="text-accent"
-            >
-              {isPlaying ? (
-                <Pause className="h-3.5 w-3.5 fill-current" />
-              ) : (
-                <Play className="h-3.5 w-3.5 fill-current" />
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setCurrentTime(totalDurationSec)}
-              aria-label="Jump to end"
-            >
-              <SkipForward className="h-3.5 w-3.5" />
-            </Button>
+        {/* Scene Navigation & Management Bar */}
+        <SceneBar
+          project={project}
+          activeSceneId={editorState.activeSceneId}
+          onSelectScene={handleSelectScene}
+          onCreateScene={handleCreateScene}
+          onRenameScene={handleRenameScene}
+          onDuplicateScene={handleDuplicateScene}
+          onDeleteScene={handleDeleteScene}
+          onReorderScenes={handleReorderScenes}
+        />
 
-            <Divider orientation="vertical" className="h-4 mx-1" />
-
-            {/* Timecode & Framerate Readout */}
-            <div className="flex items-center gap-1 font-mono text-xs">
-              <span className="text-text-primary font-semibold">
-                00:00:0{currentTime.toFixed(1).replace(".", ":")}
-              </span>
-              <span className="text-text-muted">/ 00:00:05:00</span>
-              <span className="rounded-xs bg-surface border border-border px-1 text-[10px] text-text-muted ml-1">
-                60 FPS
-              </span>
-            </div>
-          </div>
-
-          {/* Timeline Zoom & Snapping controls */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-caption text-text-muted">
-              <span className="text-[11px] font-mono">Zoom</span>
-              <div className="w-20">
-                <Slider defaultValue={60} min={10} max={100} />
-              </div>
-            </div>
-
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Toggle loop playback"
-              className="text-text-muted hover:text-text-primary"
-            >
-              <Repeat className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Timeline Body (Layer Headers on Left, Track Grid on Right) */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left Layer Headers Column (w-60) */}
-          <div className="w-60 border-r border-border bg-surface flex flex-col shrink-0 overflow-y-auto">
-            {/* Layers Column Header */}
-            <div className="h-6 border-b border-border-subtle px-3 flex items-center justify-between text-[10px] font-mono text-text-muted uppercase">
-              <span>Layers ({tracks.length})</span>
-              <span>Controls</span>
-            </div>
-
-            {/* Layer Rows */}
-            <div className="flex-1 divide-y divide-border-subtle">
-              {tracks.map((track) => {
-                const isSelected = track.id === selectedLayerId;
-                return (
-                  <div
-                    key={track.id}
-                    onClick={() => setSelectedLayerId(track.id)}
-                    className={cn(
-                      "h-8 px-2 flex items-center justify-between text-xs cursor-pointer transition-colors duration-fast",
-                      isSelected
-                        ? "bg-surface-elevated text-text-primary"
-                        : "hover:bg-surface-elevated/40 text-text-secondary"
-                    )}
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <span
-                        className="h-2 w-2 rounded-full shrink-0"
-                        style={{ backgroundColor: track.color }}
-                      />
-                      <span className="truncate text-[11px] font-medium">
-                        {track.name}
-                      </span>
-                    </div>
-
-                    <div
-                      className="flex items-center gap-1 text-text-muted shrink-0"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => toggleTrackVisibility(track.id)}
-                        className="p-1 hover:text-text-primary transition-colors"
-                        aria-label="Toggle visibility"
-                      >
-                        {track.visible ? (
-                          <Eye className="h-3 w-3" />
-                        ) : (
-                          <EyeOff className="h-3 w-3 text-text-muted/40" />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => toggleTrackLock(track.id)}
-                        className="p-1 hover:text-text-primary transition-colors"
-                        aria-label="Toggle lock"
-                      >
-                        {track.locked ? (
-                          <Lock className="h-3 w-3 text-warning" />
-                        ) : (
-                          <Unlock className="h-3 w-3 text-text-muted/40" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Right Track Area & Time Ruler */}
-          <div className="flex-1 flex flex-col overflow-x-auto relative bg-[#090A0F]">
-            {/* Time Ruler (Seconds markers: 0s, 1s, 2s, 3s, 4s, 5s) */}
-            <div className="h-6 border-b border-border bg-surface-elevated/60 flex items-center relative text-[10px] font-mono text-text-muted select-none">
-              {[0, 1, 2, 3, 4, 5].map((sec) => (
-                <div
-                  key={sec}
-                  className="absolute flex flex-col items-center"
-                  style={{ left: `${(sec / totalDurationSec) * 100}%` }}
-                >
-                  <span className="-translate-x-1/2">{sec}s</span>
-                  <span className="h-1.5 w-px bg-border" />
-                </div>
-              ))}
-            </div>
-
-            {/* Track Rows Canvas */}
-            <div className="flex-1 relative divide-y divide-border-subtle/50">
-              {tracks.map((track) => {
-                const trackStartPct = (track.startSec / totalDurationSec) * 100;
-                const trackWidthPct = (track.durationSec / totalDurationSec) * 100;
-                const isSelected = track.id === selectedLayerId;
-
-                return (
-                  <div
-                    key={track.id}
-                    className={cn(
-                      "h-8 relative flex items-center",
-                      isSelected && "bg-surface-elevated/20"
-                    )}
-                  >
-                    {/* Track Span Bar */}
-                    <div
-                      className="absolute h-5 rounded-xs border transition-all duration-instant flex items-center px-1"
-                      style={{
-                        left: `${trackStartPct}%`,
-                        width: `${trackWidthPct}%`,
-                        backgroundColor: `${track.color}22`,
-                        borderColor: track.color,
-                      }}
-                    >
-                      {/* Keyframe Visual Markers (◆ diamonds) */}
-                      {track.keyframes.map((kf, i) => {
-                        const kfOffsetPct =
-                          ((kf - track.startSec) / track.durationSec) * 100;
-                        return (
-                          <span
-                            key={i}
-                            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 text-[10px] leading-none"
-                            style={{
-                              left: `${kfOffsetPct}%`,
-                              color: track.color,
-                            }}
-                            title={`Keyframe at ${kf}s`}
-                          >
-                            ◆
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {/* Vertical Playhead Scrubber Visual */}
-              <div
-                className="absolute top-0 bottom-0 z-30 pointer-events-none transition-all duration-instant flex flex-col items-center"
-                style={{ left: `${playheadPercent}%` }}
-              >
-                {/* Playhead Flag / Head */}
-                <div className="h-3 w-3 rounded-xs bg-accent text-accent-foreground flex items-center justify-center -translate-y-2 shadow-subtle">
-                  <span className="h-1 w-1 rounded-full bg-white" />
-                </div>
-                {/* Playhead Scrubber Line */}
-                <div className="w-px flex-1 bg-accent" />
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Visual Timeline Panel */}
+        <TimelinePanel
+          scene={activeScene}
+          project={project}
+          selectedElementId={selectedElementId || undefined}
+          onSelectElement={handleSelectElement}
+          onTimeChange={setCurrentTime}
+          onToggleVisibility={handleToggleVisibility}
+          onToggleLock={handleLockToggle}
+          onUpdateElement={(elementId, updates) => {
+            pushHistory(editorState.project);
+            setEditorState((prev) =>
+              updateElementInActiveScene(prev, elementId, updates)
+            );
+            autosaveManagerRef.current?.notifyChange(editorState.project);
+          }}
+          height={224}
+        />
       </footer>
+
+      {/* Export & Render Foundation Dialog */}
+      <ExportDialog
+        isOpen={isExportDialogOpen}
+        onClose={() => setIsExportDialogOpen(false)}
+        project={project}
+        activeSceneId={editorState.activeSceneId}
+        currentTime={currentTime}
+      />
     </div>
   );
 }

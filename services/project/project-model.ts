@@ -432,3 +432,49 @@ export function updateProjectMetadata(
     },
   });
 }
+
+/**
+ * Immutably adds an asset to the project.
+ * If an asset with the same ID already exists, it updates it.
+ */
+export function addAsset(project: Project, asset: Asset): Project {
+  const existingAssets = project.assets || [];
+  const existingIndex = existingAssets.findIndex((a) => a.id === asset.id);
+
+  let nextAssets: Asset[];
+  if (existingIndex >= 0) {
+    nextAssets = existingAssets.map((a, i) => (i === existingIndex ? asset : a));
+  } else {
+    nextAssets = [...existingAssets, asset];
+  }
+
+  return updateProject(project, { assets: nextAssets });
+}
+
+/**
+ * Immutably removes an asset from the project by id.
+ */
+export function removeAsset(project: Project, assetId: string): Project {
+  const remainingAssets = (project.assets || []).filter((a) => a.id !== assetId);
+  return updateProject(project, { assets: remainingAssets });
+}
+
+/**
+ * Immutably updates an asset within the project.
+ */
+export function updateAsset(
+  project: Project,
+  assetId: string,
+  updates: Partial<Asset>
+): Project {
+  const nextAssets = (project.assets || []).map((asset) => {
+    if (asset.id !== assetId) return asset;
+    return {
+      ...asset,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  return updateProject(project, { assets: nextAssets });
+}

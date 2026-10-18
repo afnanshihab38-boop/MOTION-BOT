@@ -95,6 +95,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
             className="pointer-events-auto bg-neutral-900 border border-indigo-400 rounded-none shadow-sm hover:scale-125 transition-transform"
             onMouseDown={(e) => {
               e.stopPropagation();
+              e.preventDefault();
               onHandleMouseDown?.(id, e);
             }}
           />
@@ -125,6 +126,7 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
             className="pointer-events-auto rounded-full bg-indigo-500 border border-white shadow-sm hover:scale-125 transition-transform"
             onMouseDown={(e) => {
               e.stopPropagation();
+              e.preventDefault();
               onRotateMouseDown?.(e);
             }}
           />

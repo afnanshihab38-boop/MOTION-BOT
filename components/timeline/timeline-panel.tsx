@@ -8,8 +8,20 @@
  */
 
 import * as React from "react";
+import { Eye, EyeOff, Lock, Unlock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { defaultTimelineManager, TimelineState, getEvaluatedSceneAtTime } from "@/timeline";
+import {
+  defaultTimelineManager,
+  TimelineState,
+  getEvaluatedSceneAtTime,
+} from "@/timeline";
+import {
+  getElementTiming,
+  addKeyframeToElement,
+  deleteKeyframeFromElement,
+  moveKeyframeOnElement,
+  updateElementTiming,
+} from "@/services/timeline";
 import { MotionElement } from "@/types/element";
 import { AnimatableProperty, Keyframe, PropertyAnimationTrack } from "@/types/animation";
 import { TimelineHeader } from "./timeline-header";
@@ -43,6 +55,13 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
   height,
   defaultExpandAll = false,
   onTimeChange,
+  onToggleVisibility,
+  onToggleLock,
+  onUpdateElement,
+  onAddKeyframe,
+  onDeleteKeyframe,
+  onMoveKeyframe,
+  onUpdateLayerTiming,
 }) => {
   // Local state reflecting observable TimelineState from TimelineManager
   const [timelineState, setTimelineState] = React.useState<TimelineState>(() =>
@@ -103,6 +122,139 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
     return Math.max(600, Math.ceil(timelineState.duration * pixelsPerSecond));
   }, [timelineState.duration, pixelsPerSecond]);
 
+  // Keyframe Selection
+  const handleKeyframeSelection = React.useCallback(
+    (keyframeId: string, trackId?: string) => {
+      timelineManager.selectKeyframe(keyframeId, trackId);
+      onSelectKeyframe?.(keyframeId, trackId);
+    },
+    [timelineManager, onSelectKeyframe]
+  );
+
+  // Add Keyframe Internal
+  const handleAddKeyframeInternal = React.useCallback(
+    (elementId: string, property: AnimatableProperty, time: number) => {
+      if (onAddKeyframe) {
+        onAddKeyframe(elementId, property, time);
+        return;
+      }
+      if (!scene || !onUpdateElement) return;
+      const target = scene.elements.find((el) => el.id === elementId);
+      if (!target) return;
+      const res = addKeyframeToElement(
+        target,
+        property,
+        time,
+        undefined,
+        timelineState.fps
+      );
+      onUpdateElement(elementId, res.element);
+    },
+    [onAddKeyframe, scene, onUpdateElement, timelineState.fps]
+  );
+
+  // Delete Keyframe Internal
+  const handleDeleteKeyframeInternal = React.useCallback(
+    (elementId: string, keyframeId: string) => {
+      if (onDeleteKeyframe) {
+        onDeleteKeyframe(elementId, keyframeId);
+        return;
+      }
+      if (!scene || !onUpdateElement) return;
+      const target = scene.elements.find((el) => el.id === elementId);
+      if (!target) return;
+      const updated = deleteKeyframeFromElement(target, keyframeId);
+      onUpdateElement(elementId, updated);
+      if (timelineState.selection.selectedKeyframeId === keyframeId) {
+        timelineManager.selectKeyframe(null);
+      }
+    },
+    [
+      onDeleteKeyframe,
+      scene,
+      onUpdateElement,
+      timelineState.selection.selectedKeyframeId,
+      timelineManager,
+    ]
+  );
+
+  // Move Keyframe Internal
+  const handleMoveKeyframeInternal = React.useCallback(
+    (elementId: string, keyframeId: string, newTime: number) => {
+      if (onMoveKeyframe) {
+        onMoveKeyframe(elementId, keyframeId, newTime);
+        return;
+      }
+      if (!scene || !onUpdateElement) return;
+      const target = scene.elements.find((el) => el.id === elementId);
+      if (!target) return;
+      const updated = moveKeyframeOnElement(
+        target,
+        keyframeId,
+        newTime,
+        timelineState.fps
+      );
+      onUpdateElement(elementId, updated);
+    },
+    [onMoveKeyframe, scene, onUpdateElement, timelineState.fps]
+  );
+
+  // Update Layer Timing Internal
+  const handleUpdateLayerTimingInternal = React.useCallback(
+    (elementId: string, startTime: number, duration: number) => {
+      if (onUpdateLayerTiming) {
+        onUpdateLayerTiming(elementId, startTime, duration);
+        return;
+      }
+      if (!scene || !onUpdateElement) return;
+      const target = scene.elements.find((el) => el.id === elementId);
+      if (!target) return;
+      const updated = updateElementTiming(
+        target,
+        startTime,
+        duration,
+        timelineState.fps
+      );
+      onUpdateElement(elementId, updated);
+    },
+    [onUpdateLayerTiming, scene, onUpdateElement, timelineState.fps]
+  );
+
+  // Keyboard shortcut for deleting selected keyframe
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+      if (
+        (e.code === "Delete" || e.code === "Backspace") &&
+        timelineState.selection.selectedKeyframeId &&
+        scene
+      ) {
+        const kfId = timelineState.selection.selectedKeyframeId;
+        for (const el of scene.elements) {
+          const hasKf = el.propertyTracks?.some((t) =>
+            t.keyframes?.some((k) => k.id === kfId)
+          );
+          if (hasKf) {
+            e.preventDefault();
+            handleDeleteKeyframeInternal(el.id, kfId);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    timelineState.selection.selectedKeyframeId,
+    scene,
+    handleDeleteKeyframeInternal,
+  ]);
+
   // Convert Scene elements to timeline tracks with grouped property hierarchy
   const tracks: ElementTimelineTrack[] = React.useMemo(() => {
     if (!scene || !Array.isArray(scene.elements)) return [];
@@ -122,6 +274,11 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
 
       const isAnimated = propertyGroups.some((g) => g.hasKeyframes);
       const color = ELEMENT_TYPE_COLORS[el.type] || "#6366F1";
+      const timing = getElementTiming(
+        el,
+        timelineState.fps,
+        scene.duration || timelineState.duration
+      );
 
       return {
         element: el,
@@ -129,8 +286,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         name: el.name || `${el.type} element`,
         type: el.type,
         color,
-        startSec: 0,
-        durationSec: scene.duration || timelineState.duration,
+        startSec: timing.startTime,
+        durationSec: timing.duration,
         visible: el.visible !== false,
         locked: el.locked === true,
         zIndex: el.zIndex ?? 0,
@@ -139,7 +296,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         isAnimated,
       };
     });
-  }, [scene, timelineState.duration]);
+  }, [scene, timelineState.duration, timelineState.fps]);
 
   // Notify canvas/parent when currentTime changes (Timeline -> currentTime -> Motion Engine -> evaluated scene -> Canvas)
   const prevTimeRef = React.useRef(timelineState.currentTime);
@@ -230,9 +387,41 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                       {track.name}
                     </span>
                   </div>
-                  <span className="text-[9px] font-mono text-text-muted">
-                    z:{track.zIndex}
-                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleVisibility?.(track.elementId);
+                      }}
+                      className="p-0.5 text-text-muted hover:text-text-primary transition-colors"
+                      aria-label={track.visible ? "Hide element" : "Show element"}
+                    >
+                      {track.visible ? (
+                        <Eye className="h-3 w-3" />
+                      ) : (
+                        <EyeOff className="h-3 w-3 text-text-muted/40" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleLock?.(track.elementId);
+                      }}
+                      className="p-0.5 text-text-muted hover:text-text-primary transition-colors"
+                      aria-label={track.locked ? "Unlock element" : "Lock element"}
+                    >
+                      {track.locked ? (
+                        <Lock className="h-3 w-3 text-warning" />
+                      ) : (
+                        <Unlock className="h-3 w-3 text-text-muted/40" />
+                      )}
+                    </button>
+                    <span className="text-[9px] font-mono text-text-muted">
+                      z:{track.zIndex}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Indented Property Labels when expanded */}
@@ -284,22 +473,38 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
             />
 
             {/* Elements & Sub-Property Tracks */}
-            {tracks.map((track) => (
-              <TrackRow
-                key={track.elementId}
-                track={track}
-                pixelsPerSecond={pixelsPerSecond}
-                timelineWidth={timelineWidth}
-                duration={timelineState.duration}
-                currentTime={timelineState.currentTime}
-                isSelected={track.elementId === selectedElementId}
-                isExpanded={expandedElementIds.has(track.elementId)}
-                onToggleExpand={() => handleToggleExpand(track.elementId)}
-                onSelectTrack={() => onSelectElement?.(track.elementId)}
-                selectedKeyframeId={timelineState.selection.selectedKeyframeId}
-                onSelectKeyframe={onSelectKeyframe}
-              />
-            ))}
+            {tracks.length === 0 ? (
+              <div className="h-32 flex flex-col items-center justify-center p-6 text-center text-text-muted select-none">
+                <p className="text-xs font-medium text-text-secondary">Timeline is ready</p>
+                <p className="text-[11px] text-text-muted mt-1 max-w-xs">
+                  Add layers to this scene to animate transform and visual properties with frame-accurate keyframes.
+                </p>
+              </div>
+            ) : (
+              tracks.map((track) => (
+                <TrackRow
+                  key={track.elementId}
+                  track={track}
+                  pixelsPerSecond={pixelsPerSecond}
+                  timelineWidth={timelineWidth}
+                  duration={timelineState.duration}
+                  currentTime={timelineState.currentTime}
+                  fps={timelineState.fps}
+                  isSelected={track.elementId === selectedElementId}
+                  isExpanded={expandedElementIds.has(track.elementId)}
+                  onToggleExpand={() => handleToggleExpand(track.elementId)}
+                  onSelectTrack={() => onSelectElement?.(track.elementId)}
+                  selectedKeyframeId={timelineState.selection.selectedKeyframeId}
+                  onSelectKeyframe={handleKeyframeSelection}
+                  onToggleVisibility={onToggleVisibility}
+                  onToggleLock={onToggleLock}
+                  onUpdateLayerTiming={handleUpdateLayerTimingInternal}
+                  onAddKeyframe={handleAddKeyframeInternal}
+                  onDeleteKeyframe={handleDeleteKeyframeInternal}
+                  onMoveKeyframe={handleMoveKeyframeInternal}
+                />
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -309,7 +514,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
 
 /**
  * Builds hierarchical property groups (Position, Scale, Rotation, Opacity, Dimensions)
- * from an element's Phase 3 propertyTracks.
+ * from an element's Phase 3 propertyTracks. Ensures standard transform groups are
+ * always editable even before initial keyframes are created.
  */
 function buildPropertyGroups(element: MotionElement): GroupedPropertyTrack[] {
   const tracks = element.propertyTracks || [];
@@ -326,78 +532,70 @@ function buildPropertyGroups(element: MotionElement): GroupedPropertyTrack[] {
   // 1. Position (x, y)
   const xTrack = trackMap.get("x");
   const yTrack = trackMap.get("y");
-  if (xTrack || yTrack) {
-    const keyframes = aggregateKeyframes([xTrack, yTrack]);
-    groups.push({
-      id: "position",
-      name: "Position (X, Y)",
-      category: "position",
-      properties: ["x", "y"],
-      keyframes,
-      hasKeyframes: keyframes.length > 0,
-      enabled: Boolean(xTrack?.enabled || yTrack?.enabled),
-    });
-  }
+  const posKeyframes = aggregateKeyframes([xTrack, yTrack]);
+  groups.push({
+    id: "position",
+    name: "Position (X, Y)",
+    category: "position",
+    properties: ["x", "y"],
+    keyframes: posKeyframes,
+    hasKeyframes: posKeyframes.length > 0,
+    enabled: Boolean(xTrack?.enabled ?? yTrack?.enabled ?? true),
+  });
 
   // 2. Scale (scaleX, scaleY)
   const sxTrack = trackMap.get("scaleX");
   const syTrack = trackMap.get("scaleY");
-  if (sxTrack || syTrack) {
-    const keyframes = aggregateKeyframes([sxTrack, syTrack]);
-    groups.push({
-      id: "scale",
-      name: "Scale (X, Y)",
-      category: "scale",
-      properties: ["scaleX", "scaleY"],
-      keyframes,
-      hasKeyframes: keyframes.length > 0,
-      enabled: Boolean(sxTrack?.enabled || syTrack?.enabled),
-    });
-  }
+  const scaleKeyframes = aggregateKeyframes([sxTrack, syTrack]);
+  groups.push({
+    id: "scale",
+    name: "Scale (X, Y)",
+    category: "scale",
+    properties: ["scaleX", "scaleY"],
+    keyframes: scaleKeyframes,
+    hasKeyframes: scaleKeyframes.length > 0,
+    enabled: Boolean(sxTrack?.enabled ?? syTrack?.enabled ?? true),
+  });
 
   // 3. Rotation
   const rotTrack = trackMap.get("rotation");
-  if (rotTrack) {
-    const keyframes = rotTrack.keyframes || [];
-    groups.push({
-      id: "rotation",
-      name: "Rotation",
-      category: "rotation",
-      properties: ["rotation"],
-      keyframes,
-      hasKeyframes: keyframes.length > 0,
-      enabled: rotTrack.enabled,
-    });
-  }
+  const rotKeyframes = rotTrack?.keyframes || [];
+  groups.push({
+    id: "rotation",
+    name: "Rotation",
+    category: "rotation",
+    properties: ["rotation"],
+    keyframes: rotKeyframes,
+    hasKeyframes: rotKeyframes.length > 0,
+    enabled: rotTrack?.enabled ?? true,
+  });
 
   // 4. Opacity
   const opTrack = trackMap.get("opacity");
-  if (opTrack) {
-    const keyframes = opTrack.keyframes || [];
-    groups.push({
-      id: "opacity",
-      name: "Opacity",
-      category: "opacity",
-      properties: ["opacity"],
-      keyframes,
-      hasKeyframes: keyframes.length > 0,
-      enabled: opTrack.enabled,
-    });
-  }
+  const opKeyframes = opTrack?.keyframes || [];
+  groups.push({
+    id: "opacity",
+    name: "Opacity",
+    category: "opacity",
+    properties: ["opacity"],
+    keyframes: opKeyframes,
+    hasKeyframes: opKeyframes.length > 0,
+    enabled: opTrack?.enabled ?? true,
+  });
 
   // 5. Dimensions (width, height)
   const wTrack = trackMap.get("width");
   const hTrack = trackMap.get("height");
-  if (wTrack || hTrack) {
-    const keyframes = aggregateKeyframes([wTrack, hTrack]);
+  if (wTrack || hTrack || element.transform.width !== undefined) {
+    const dimKeyframes = aggregateKeyframes([wTrack, hTrack]);
     groups.push({
       id: "dimensions",
       name: "Dimensions (W, H)",
       category: "dimensions",
       properties: ["width", "height"],
-      keyframes,
-      hasKeyframes: keyframes.length > 0,
-      enabled: Boolean(wTrack?.enabled || hTrack?.enabled),
+      keyframes: dimKeyframes,
+      hasKeyframes: dimKeyframes.length > 0,
+      enabled: Boolean(wTrack?.enabled ?? hTrack?.enabled ?? true),
     });
   }
 

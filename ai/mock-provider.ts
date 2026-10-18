@@ -82,6 +82,11 @@ export class MockLLMProvider extends BaseLLMProvider {
         const systemMsg = normalized.messages.find((m) => m.role === "system");
         const systemContent = typeof systemMsg?.content === "string" ? systemMsg.content : "";
 
+        // Detect Contextual Edit requests
+        const isContextualEditRequest =
+          userContent.includes("CONTEXTUAL_EDIT") ||
+          systemContent.includes("Contextual Editing Engine");
+
         // Detect Motion Plan requests
         const isMotionPlanRequest =
           userContent.includes("=== CREATIVE BRIEF INPUT ===") ||
@@ -89,7 +94,24 @@ export class MockLLMProvider extends BaseLLMProvider {
           userContent.includes("MOTION_PLAN") ||
           Boolean(systemContent.includes("MOTION PLANNER"));
 
-        if (isMotionPlanRequest) {
+        if (isContextualEditRequest) {
+          jsonPayload = {
+            actions: [
+              {
+                id: "mock_act_1",
+                type: "UPDATE_TEXT_PROPERTY",
+                sceneId: "scene-1",
+                elementId: "elem_headline",
+                targetName: "Headline Text",
+                property: "fontSize",
+                description: "Increase Headline Text font size from 56px → 70px",
+                previousValue: 56,
+                proposedValue: 70,
+                payload: { fontSize: 70 },
+              },
+            ],
+          };
+        } else if (isMotionPlanRequest) {
           const matchBriefId = userContent.match(/Brief ID:\s*([^\r\n]+)/);
           const matchTitle = userContent.match(/Title:\s*([^\r\n]+)/);
           const matchDuration = userContent.match(/Total Duration:\s*([0-9.]+)/);

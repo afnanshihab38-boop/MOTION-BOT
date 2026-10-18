@@ -16,6 +16,7 @@ import {
   ShapeElement,
   ImageElement,
   LogoElement,
+  VideoElement,
   FillStyle,
   GradientFill,
   ColorStop,
@@ -331,6 +332,8 @@ function renderElementContent(
       return renderImageElement(element as ImageElement, assetMap);
     case "logo":
       return renderLogoElement(element as LogoElement, assetMap);
+    case "video":
+      return renderVideoElement(element as VideoElement, assetMap);
     case "group":
       return renderGroupElement();
     default:
@@ -650,8 +653,40 @@ function renderLogoElement(
 }
 
 /**
+ * Renders video asset elements with autoplay and mute controls.
+ */
+function renderVideoElement(
+  element: VideoElement,
+  assetMap: Map<string, Asset>
+): React.ReactNode {
+  const asset = element.assetId ? assetMap.get(element.assetId) : undefined;
+  const url = element.src || asset?.url || "";
+
+  if (!url) {
+    return (
+      <div className="w-full h-full bg-surface-elevated/40 border border-dashed border-blue-500/40 flex items-center justify-center text-blue-400 text-[11px] font-mono select-none">
+        Video Asset
+      </div>
+    );
+  }
+
+  return (
+    <video
+      src={url}
+      style={{ objectFit: "cover" }}
+      className="w-full h-full pointer-events-none"
+      muted={element.muted ?? true}
+      loop={element.loop ?? true}
+      autoPlay
+      playsInline
+    />
+  );
+}
+
+/**
  * Renders hierarchical element group containers.
  */
 function renderGroupElement(): React.ReactNode {
   return <div className="w-full h-full relative" />;
 }
+

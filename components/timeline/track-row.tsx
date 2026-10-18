@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ElementTimelineTrack } from "./types";
 import { PropertyTrackRow } from "./property-track-row";
+import { AnimatableProperty } from "@/types/animation";
 
 export interface TrackRowProps {
   track: ElementTimelineTrack;
@@ -31,6 +32,7 @@ export interface TrackRowProps {
   timelineWidth: number;
   duration?: number;
   currentTime: number;
+  fps?: number;
   isSelected: boolean;
   isExpanded: boolean;
   onToggleExpand: () => void;
@@ -39,6 +41,10 @@ export interface TrackRowProps {
   onToggleLock?: (elementId: string) => void;
   selectedKeyframeId?: string | null;
   onSelectKeyframe?: (keyframeId: string, trackId?: string) => void;
+  onUpdateLayerTiming?: (elementId: string, startTime: number, duration: number) => void;
+  onAddKeyframe?: (elementId: string, property: AnimatableProperty, time: number) => void;
+  onDeleteKeyframe?: (elementId: string, keyframeId: string) => void;
+  onMoveKeyframe?: (elementId: string, keyframeId: string, newTime: number) => void;
 }
 
 export const TrackRow: React.FC<TrackRowProps> = ({
@@ -46,6 +52,7 @@ export const TrackRow: React.FC<TrackRowProps> = ({
   pixelsPerSecond,
   timelineWidth,
   currentTime,
+  fps = 30,
   isSelected,
   isExpanded,
   onToggleExpand,
@@ -54,6 +61,10 @@ export const TrackRow: React.FC<TrackRowProps> = ({
   onToggleLock,
   selectedKeyframeId,
   onSelectKeyframe,
+  onUpdateLayerTiming,
+  onAddKeyframe,
+  onDeleteKeyframe,
+  onMoveKeyframe,
 }) => {
   // Select icon matching element type
   const ElementIcon = React.useMemo(() => {
@@ -74,6 +85,75 @@ export const TrackRow: React.FC<TrackRowProps> = ({
   const clipStartPx = Math.max(0, track.startSec * pixelsPerSecond);
   const clipWidthPx = Math.max(16, track.durationSec * pixelsPerSecond);
   const hasProperties = track.propertyGroups.length > 0;
+
+  // Layer timing drag interaction
+  const [isDraggingClip, setIsDraggingClip] = React.useState(false);
+  const clipDragRef = React.useRef({
+    startX: 0,
+    initialStart: track.startSec,
+    initialDuration: track.durationSec,
+    mode: "move" as "move" | "trim-start" | "trim-end",
+  });
+
+  const handleClipPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0 || !onUpdateLayerTiming) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSelectTrack();
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    let mode: "move" | "trim-start" | "trim-end" = "move";
+    if (clickX <= 6) {
+      mode = "trim-start";
+    } else if (clickX >= rect.width - 6) {
+      mode = "trim-end";
+    }
+
+    clipDragRef.current = {
+      startX: e.clientX,
+      initialStart: track.startSec,
+      initialDuration: track.durationSec,
+      mode,
+    };
+    setIsDraggingClip(true);
+
+    const handlePointerMove = (moveEv: PointerEvent) => {
+      moveEv.preventDefault();
+      const deltaX = moveEv.clientX - clipDragRef.current.startX;
+      const deltaSec = deltaX / pixelsPerSecond;
+      const safeFps = Math.max(1, fps);
+
+      if (clipDragRef.current.mode === "move") {
+        const rawStart = Math.max(0, clipDragRef.current.initialStart + deltaSec);
+        const snappedStart = Math.round(rawStart * safeFps) / safeFps;
+        onUpdateLayerTiming(track.elementId, snappedStart, clipDragRef.current.initialDuration);
+      } else if (clipDragRef.current.mode === "trim-start") {
+        const minDuration = 1 / safeFps;
+        const maxStart = clipDragRef.current.initialStart + clipDragRef.current.initialDuration - minDuration;
+        const rawStart = Math.max(0, Math.min(maxStart, clipDragRef.current.initialStart + deltaSec));
+        const snappedStart = Math.round(rawStart * safeFps) / safeFps;
+        const newDuration = Math.round((clipDragRef.current.initialStart + clipDragRef.current.initialDuration - snappedStart) * safeFps) / safeFps;
+        onUpdateLayerTiming(track.elementId, snappedStart, Math.max(minDuration, newDuration));
+      } else if (clipDragRef.current.mode === "trim-end") {
+        const minDuration = 1 / safeFps;
+        const rawDuration = Math.max(minDuration, clipDragRef.current.initialDuration + deltaSec);
+        const snappedDuration = Math.round(rawDuration * safeFps) / safeFps;
+        onUpdateLayerTiming(track.elementId, clipDragRef.current.initialStart, snappedDuration);
+      }
+    };
+
+    const handlePointerUp = () => {
+      setIsDraggingClip(false);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+  };
 
   return (
     <div className="flex flex-col border-b border-border-subtle/50">
@@ -166,24 +246,33 @@ export const TrackRow: React.FC<TrackRowProps> = ({
         >
           {/* Visual Element Clip Span Bar */}
           <div
+            onPointerDown={handleClipPointerDown}
             style={{
               left: `${clipStartPx}px`,
               width: `${clipWidthPx}px`,
             }}
+            title={`${track.name}: ${track.startSec.toFixed(2)}s - ${(track.startSec + track.durationSec).toFixed(2)}s (${track.durationSec.toFixed(2)}s)`}
             className={cn(
-              "absolute h-5 rounded-xs border flex items-center px-2 select-none overflow-hidden",
+              "absolute h-5 rounded-xs border flex items-center px-2 select-none overflow-hidden cursor-grab",
               isSelected
                 ? "bg-accent/25 border-accent shadow-xs"
-                : "bg-surface-elevated/70 border-border hover:border-border-active"
+                : "bg-surface-elevated/70 border-border hover:border-border-active",
+              isDraggingClip && "cursor-grabbing ring-1 ring-accent"
             )}
           >
+            {/* Left trim handle */}
+            <div className="absolute left-0 top-0 bottom-0 w-1.5 hover:bg-accent/50 cursor-ew-resize" />
+
             <span
-              className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5"
+              className="w-1.5 h-1.5 rounded-full shrink-0 mr-1.5 pointer-events-none"
               style={{ backgroundColor: track.color }}
             />
-            <span className="text-[10px] font-medium truncate text-text-secondary">
-              {track.name}
+            <span className="text-[10px] font-medium truncate text-text-secondary pointer-events-none">
+              {track.name} ({track.startSec.toFixed(1)}s - {(track.startSec + track.durationSec).toFixed(1)}s)
             </span>
+
+            {/* Right trim handle */}
+            <div className="absolute right-0 top-0 bottom-0 w-1.5 hover:bg-accent/50 cursor-ew-resize" />
           </div>
 
           {/* Keyframe Summary Nodes (Visible on main track bar when collapsed) */}
@@ -211,9 +300,13 @@ export const TrackRow: React.FC<TrackRowProps> = ({
             propertyGroup={group}
             pixelsPerSecond={pixelsPerSecond}
             currentTime={currentTime}
+            fps={fps}
             timelineWidth={timelineWidth}
             selectedKeyframeId={selectedKeyframeId}
             onSelectKeyframe={onSelectKeyframe}
+            onAddKeyframe={onAddKeyframe}
+            onDeleteKeyframe={onDeleteKeyframe}
+            onMoveKeyframe={onMoveKeyframe}
           />
         ))}
     </div>

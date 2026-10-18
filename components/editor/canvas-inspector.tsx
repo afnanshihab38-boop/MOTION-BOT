@@ -17,6 +17,12 @@ import {
   Film,
   Sparkles,
   Zap,
+  Copy,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpToLine,
+  ArrowDownToLine,
 } from "lucide-react";
 import { Panel, PanelHeader, PanelContent } from "@/components/ui/panel";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -47,6 +53,12 @@ export interface CanvasInspectorProps {
   onUpdateElement?: (updates: Partial<MotionElement>) => void;
   onUpdateSceneBackground?: (bg: SceneBackground) => void;
   onLockToggle?: (elementId: string, locked: boolean) => void;
+  onDuplicateElement?: (elementId: string) => void;
+  onDeleteElement?: (elementId: string) => void;
+  onReorderElement?: (
+    elementId: string,
+    action: "bringForward" | "sendBackward" | "bringToFront" | "sendToBack"
+  ) => void;
   // Legacy / granular callbacks for backwards compatibility
   onTransformChange?: (updates: Partial<Transform2D>) => void;
   onOpacityChange?: (opacity: number) => void;
@@ -62,6 +74,9 @@ export const CanvasInspector: React.FC<CanvasInspectorProps> = ({
   onUpdateElement,
   onUpdateSceneBackground,
   onLockToggle,
+  onDuplicateElement,
+  onDeleteElement,
+  onReorderElement,
   onTransformChange,
   onOpacityChange,
   onTextContentChange,
@@ -92,12 +107,19 @@ export const CanvasInspector: React.FC<CanvasInspectorProps> = ({
               </span>
             }
           />
-          <PanelContent className="p-0 overflow-y-auto flex-1">
+          <PanelContent className="p-0 overflow-y-auto flex-1 flex flex-col justify-between">
             <ProjectSceneSection
               project={project}
               activeScene={activeScene}
               onUpdateSceneBackground={onUpdateSceneBackground}
             />
+
+            <div className="p-3 m-3 rounded-md border border-dashed border-border/80 bg-surface-elevated/30 text-[11px] text-text-muted flex items-start gap-2 select-none">
+              <Sparkles className="h-3.5 w-3.5 text-accent shrink-0 mt-0.5" />
+              <span>
+                Select any layer on the canvas to inspect transform, typography, fill, and motion tracks.
+              </span>
+            </div>
           </PanelContent>
         </Panel>
       </aside>
@@ -174,6 +196,28 @@ export const CanvasInspector: React.FC<CanvasInspectorProps> = ({
                   )}
                 </Button>
               </Tooltip>
+              <Tooltip content="Duplicate layer" shortcut="⌘D">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-text-muted hover:text-text-primary"
+                  onClick={() => onDuplicateElement?.(selectedElement.id)}
+                  aria-label="Duplicate layer"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+              </Tooltip>
+              <Tooltip content="Delete layer" shortcut="Del">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-text-muted hover:text-danger"
+                  onClick={() => onDeleteElement?.(selectedElement.id)}
+                  aria-label="Delete layer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </Tooltip>
             </div>
           }
         />
@@ -199,6 +243,57 @@ export const CanvasInspector: React.FC<CanvasInspectorProps> = ({
         )}
 
         <PanelContent className="p-0 overflow-y-auto flex-1">
+          {/* Layer Ordering Bar */}
+          <div className="px-3 py-1.5 border-b border-border bg-surface-elevated/20 flex items-center justify-between text-xs text-text-muted">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted">Layer Order</span>
+            <div className="flex items-center gap-0.5">
+              <Tooltip content="Bring to Front">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-text-muted hover:text-text-primary"
+                  onClick={() => onReorderElement?.(selectedElement.id, "bringToFront")}
+                  aria-label="Bring to Front"
+                >
+                  <ArrowUpToLine className="h-3.5 w-3.5" />
+                </Button>
+              </Tooltip>
+              <Tooltip content="Bring Forward">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-text-muted hover:text-text-primary"
+                  onClick={() => onReorderElement?.(selectedElement.id, "bringForward")}
+                  aria-label="Bring Forward"
+                >
+                  <ArrowUp className="h-3.5 w-3.5" />
+                </Button>
+              </Tooltip>
+              <Tooltip content="Send Backward">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-text-muted hover:text-text-primary"
+                  onClick={() => onReorderElement?.(selectedElement.id, "sendBackward")}
+                  aria-label="Send Backward"
+                >
+                  <ArrowDown className="h-3.5 w-3.5" />
+                </Button>
+              </Tooltip>
+              <Tooltip content="Send to Back">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-text-muted hover:text-text-primary"
+                  onClick={() => onReorderElement?.(selectedElement.id, "sendToBack")}
+                  aria-label="Send to Back"
+                >
+                  <ArrowDownToLine className="h-3.5 w-3.5" />
+                </Button>
+              </Tooltip>
+            </div>
+          </div>
+
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             {/* Modular Tab Bar with Extensible Future Slots */}
             <TabsList className="w-full px-2 border-b border-border bg-surface-elevated/20">
@@ -208,12 +303,12 @@ export const CanvasInspector: React.FC<CanvasInspectorProps> = ({
               <TabsTrigger value="transform" className="flex-1 text-[11px]">
                 Transform
               </TabsTrigger>
-              {/* Future Modular Slots (disabled until respective phases) */}
+              {/* Modular Extension Slots */}
               <TabsTrigger
                 value="motion"
                 disabled
                 className="text-[11px] opacity-40 cursor-not-allowed hidden sm:inline-flex"
-                title="Motion & Keyframes (Phase 6)"
+                title="Motion & Keyframes"
               >
                 <Zap className="h-3 w-3 mr-0.5 inline" />
                 Motion
@@ -222,7 +317,7 @@ export const CanvasInspector: React.FC<CanvasInspectorProps> = ({
                 value="effects"
                 disabled
                 className="text-[11px] opacity-40 cursor-not-allowed hidden sm:inline-flex"
-                title="Effects & Filters (Phase 8)"
+                title="Effects & Filters"
               >
                 <Sparkles className="h-3 w-3 mr-0.5 inline" />
                 FX

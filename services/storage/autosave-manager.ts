@@ -48,6 +48,25 @@ export interface AutosaveOptions {
 export type AutosaveSubscriber = (status: AutosaveStatus) => void;
 
 /**
+ * Fast deterministic content comparison between two project objects,
+ * ignoring volatile timestamp fields such as `updatedAt`.
+ */
+export function isProjectContentEqual(a: Project | null, b: Project | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.id !== b.id) return false;
+  if (a.name !== b.name) return false;
+  if (a.width !== b.width || a.height !== b.height) return false;
+  if (a.fps !== b.fps || a.duration !== b.duration) return false;
+  if (a.scenes?.length !== b.scenes?.length) return false;
+  if (a.assets?.length !== b.assets?.length) return false;
+
+  const aNorm = { ...a, updatedAt: undefined };
+  const bNorm = { ...b, updatedAt: undefined };
+  return JSON.stringify(aNorm) === JSON.stringify(bNorm);
+}
+
+/**
  * High-level manager coordinating debounced saves, concurrency queuing,
  * recovery snapshots, and sync state tracking.
  */
@@ -165,8 +184,20 @@ export class AutosaveManager {
   /**
    * Notifies the manager that the project has been modified.
    * Updates in-memory project immediately and schedules a debounced persistent save.
+   * Avoids excessive writes by ignoring changes that are content-equal to last saved state.
    */
   notifyChange(updatedProject: Project): void {
+    // If the project content hasn't actually changed from last saved state, do not write
+    if (this.lastSavedProject && isProjectContentEqual(updatedProject, this.lastSavedProject)) {
+      this.currentProject = cloneProject(updatedProject);
+      if (this.state === "unsaved") {
+        this.state = "saved";
+        this.clearTimers();
+        this.notifySubscribers();
+      }
+      return;
+    }
+
     this.currentProject = cloneProject(updatedProject);
 
     if (this.state !== "saving") {
@@ -250,7 +281,12 @@ export class AutosaveManager {
     this.notifySubscribers();
 
     try {
-      const result = await this.repository.updateProject(projectToPersist.id, projectToPersist);
+      let result: StorageResult<Project>;
+      if (typeof this.repository.saveProject === "function") {
+        result = await this.repository.saveProject(projectToPersist);
+      } else {
+        result = await this.repository.updateProject(projectToPersist.id, projectToPersist);
+      }
 
       if (result.success) {
         this.lastSavedProject = cloneProject(result.data);
@@ -258,9 +294,14 @@ export class AutosaveManager {
         this.lastError = null;
         this.saveCount += 1;
 
-        // If changes were made while this save was in flight, keep state as unsaved
+        // If changes were made while this save was in flight, check if queued differs from newly saved
         if (this.queuedProjectToSave) {
-          this.state = "unsaved";
+          if (isProjectContentEqual(this.queuedProjectToSave, this.lastSavedProject)) {
+            this.queuedProjectToSave = null;
+            this.state = "saved";
+          } else {
+            this.state = "unsaved";
+          }
         } else {
           this.state = "saved";
         }

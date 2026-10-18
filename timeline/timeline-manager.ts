@@ -36,6 +36,9 @@ import {
 export class TimelineManager implements ITimelineStateManager {
   private state: TimelineState;
   private readonly listeners: Set<TimelineStateListener> = new Set();
+  private rafId: number | null = null;
+  private timerId: ReturnType<typeof setTimeout> | null = null;
+  private lastTickTimestamp: number | null = null;
 
   constructor(options: TimelineStateOptions = {}) {
     this.state = createInitialTimelineState(options);
@@ -120,12 +123,14 @@ export class TimelineManager implements ITimelineStateManager {
    */
   public play(): void {
     this.setState(updatePlaybackState(this.state, "playing"));
+    this.startPlaybackLoop();
   }
 
   /**
    * Sets playback state to "paused", keeping the current playhead position.
    */
   public pause(): void {
+    this.stopPlaybackLoop();
     this.setState(updatePlaybackState(this.state, "paused"));
   }
 
@@ -133,7 +138,114 @@ export class TimelineManager implements ITimelineStateManager {
    * Sets playback state to "stopped" and resets playhead to inPoint or 0.
    */
   public stop(): void {
-    this.setState(updatePlaybackState(this.state, "stopped"));
+    this.stopPlaybackLoop();
+    const stoppedState = updatePlaybackState(this.state, "stopped");
+    this.setState({
+      ...stoppedState,
+      currentTime: this.state.inPoint,
+      currentFrame: timeToFrame(this.state.inPoint, this.state.fps),
+    });
+  }
+
+  /**
+   * Advances the playback clock by a given delta in seconds (or 1/fps by default).
+   * Respects loop, work area boundaries, and frame clamping.
+   */
+  public tick(deltaSec?: number): void {
+    if (this.state.playbackState !== "playing") return;
+    const step =
+      typeof deltaSec === "number" && Number.isFinite(deltaSec) && deltaSec > 0
+        ? deltaSec
+        : 1 / this.state.fps;
+
+    const nextTime = this.state.currentTime + step;
+    const targetLimit = this.state.outPoint;
+
+    if (nextTime >= targetLimit) {
+      if (this.state.loop) {
+        this.setCurrentTime(this.state.inPoint);
+      } else {
+        this.setCurrentTime(targetLimit);
+        this.pause();
+      }
+    } else {
+      this.setCurrentTime(nextTime);
+    }
+  }
+
+  private startPlaybackLoop(): void {
+    this.stopPlaybackLoop();
+    this.lastTickTimestamp =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+
+    const loopTick = () => {
+      if (this.state.playbackState !== "playing") {
+        this.stopPlaybackLoop();
+        return;
+      }
+
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      const deltaSec = this.lastTickTimestamp
+        ? Math.max(0, (now - this.lastTickTimestamp) / 1000)
+        : 1 / this.state.fps;
+      this.lastTickTimestamp = now;
+
+      const nextTime = this.state.currentTime + deltaSec;
+      const targetLimit = this.state.outPoint;
+
+      if (nextTime >= targetLimit) {
+        if (this.state.loop) {
+          this.setCurrentTime(this.state.inPoint);
+          scheduleNext();
+        } else {
+          this.setCurrentTime(targetLimit);
+          this.pause();
+        }
+      } else {
+        this.setCurrentTime(nextTime);
+        scheduleNext();
+      }
+    };
+
+    const scheduleNext = () => {
+      if (
+        typeof window !== "undefined" &&
+        typeof window.requestAnimationFrame === "function"
+      ) {
+        this.rafId = window.requestAnimationFrame(loopTick);
+      } else if (typeof setTimeout === "function") {
+        this.timerId = setTimeout(
+          loopTick,
+          Math.max(10, Math.floor(1000 / this.state.fps))
+        );
+        if (this.timerId && typeof (this.timerId as any).unref === "function") {
+          (this.timerId as any).unref();
+        }
+      }
+    };
+
+    scheduleNext();
+  }
+
+  private stopPlaybackLoop(): void {
+    if (this.rafId !== null && typeof window !== "undefined") {
+      window.cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    if (this.timerId !== null) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
+    }
+    this.lastTickTimestamp = null;
+  }
+
+  /**
+   * Destroys manager, terminates playback loop and detaches all listeners.
+   */
+  public destroy(): void {
+    this.stopPlaybackLoop();
+    this.listeners.clear();
   }
 
   /**

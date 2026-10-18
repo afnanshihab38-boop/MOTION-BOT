@@ -29,6 +29,7 @@ import { storageFailure, storageSuccess } from "./storage-error";
 export interface IProjectRepository {
   createProject(input?: CreateProjectInput | Project): Promise<StorageResult<Project>>;
   getProject(id: ProjectId): Promise<StorageResult<Project>>;
+  saveProject?(project: Project): Promise<StorageResult<Project>>;
   updateProject(id: ProjectId, updates: Partial<Project>): Promise<StorageResult<Project>>;
   deleteProject(id: ProjectId): Promise<StorageResult<void>>;
   listProjects(options?: ProjectQueryOptions): Promise<StorageResult<ProjectListResult>>;
@@ -93,8 +94,16 @@ export class ProjectRepository implements IProjectRepository {
   }
 
   /**
+   * Saves or upserts a project in storage with deep validation.
+   */
+  async saveProject(project: Project): Promise<StorageResult<Project>> {
+    return await this.storage.saveProject(project);
+  }
+
+  /**
    * Partially updates an existing project.
    * Protects the immutable project ID and auto-updates the updatedAt timestamp.
+   * If the project is not found but complete project data is provided, safely upserts it.
    */
   async updateProject(id: ProjectId, updates: Partial<Project>): Promise<StorageResult<Project>> {
     if (!id || typeof id !== "string" || id.trim() === "") {
@@ -107,7 +116,21 @@ export class ProjectRepository implements IProjectRepository {
     };
     delete (sanitizedUpdates as { id?: string }).id;
 
-    return await this.storage.updateProject(id, sanitizedUpdates);
+    const result = await this.storage.updateProject(id, sanitizedUpdates);
+    if (
+      !result.success &&
+      result.error.code === "NOT_FOUND" &&
+      (updates as any).schemaVersion &&
+      Array.isArray((updates as any).scenes)
+    ) {
+      return await this.storage.saveProject({
+        ...(updates as Project),
+        id,
+        updatedAt: sanitizedUpdates.updatedAt,
+      });
+    }
+
+    return result;
   }
 
   /**

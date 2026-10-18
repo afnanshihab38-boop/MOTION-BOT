@@ -8,8 +8,10 @@
  */
 
 import * as React from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { defaultMotionEngine } from "@/engine";
 import { MotionElement } from "@/types/element";
+import { AnimatableProperty } from "@/types/animation";
 import { GroupedPropertyTrack } from "./types";
 import { KeyframeNode } from "./keyframe-node";
 
@@ -18,9 +20,13 @@ export interface PropertyTrackRowProps {
   propertyGroup: GroupedPropertyTrack;
   pixelsPerSecond: number;
   currentTime: number;
+  fps?: number;
   timelineWidth: number;
   selectedKeyframeId?: string | null;
   onSelectKeyframe?: (keyframeId: string, trackId?: string) => void;
+  onAddKeyframe?: (elementId: string, property: AnimatableProperty, time: number) => void;
+  onDeleteKeyframe?: (elementId: string, keyframeId: string) => void;
+  onMoveKeyframe?: (elementId: string, keyframeId: string, newTime: number) => void;
 }
 
 export const PropertyTrackRow: React.FC<PropertyTrackRowProps> = ({
@@ -28,10 +34,36 @@ export const PropertyTrackRow: React.FC<PropertyTrackRowProps> = ({
   propertyGroup,
   pixelsPerSecond,
   currentTime,
+  fps = 30,
   timelineWidth,
   selectedKeyframeId,
   onSelectKeyframe,
+  onAddKeyframe,
+  onDeleteKeyframe,
+  onMoveKeyframe,
 }) => {
+  // Check if selected keyframe belongs to this property group
+  const selectedKeyframe = React.useMemo(() => {
+    if (!selectedKeyframeId) return null;
+    return propertyGroup.keyframes.find((k) => k.id === selectedKeyframeId) || null;
+  }, [propertyGroup.keyframes, selectedKeyframeId]);
+
+  const handleAddKeyframeClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onAddKeyframe) return;
+    // Add keyframe for each primary property in this group
+    for (const prop of propertyGroup.properties) {
+      onAddKeyframe(element.id, prop, currentTime);
+    }
+  };
+
+  const handleDeleteSelectedKeyframe = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (selectedKeyframe && onDeleteKeyframe) {
+      onDeleteKeyframe(element.id, selectedKeyframe.id);
+    }
+  };
+
   // Consume evaluated property value directly from Phase 6 Motion Engine (never recalculating)
   const evaluatedValueDisplay = React.useMemo(() => {
     switch (propertyGroup.category) {
@@ -71,18 +103,44 @@ export const PropertyTrackRow: React.FC<PropertyTrackRowProps> = ({
 
   return (
     <div className="h-6 flex items-stretch border-b border-border-subtle/30 bg-[#07080B] hover:bg-surface-elevated/20 transition-colors">
-      {/* Left Column: Indented Property Label & Live Evaluated Value */}
+      {/* Left Column: Indented Property Label, Live Value & Add/Delete buttons */}
       <div className="w-64 border-r border-border shrink-0 px-3 pl-8 flex items-center justify-between text-[11px] font-mono text-text-muted select-none">
         <div className="flex items-center gap-1.5 truncate">
           <span className="text-border-active">↳</span>
           <span className="truncate text-text-secondary">{propertyGroup.name}</span>
         </div>
 
-        {evaluatedValueDisplay && (
-          <span className="text-[10px] text-accent/80 font-mono shrink-0 bg-accent/10 px-1 py-0.2 rounded-xs">
-            {evaluatedValueDisplay}
-          </span>
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {evaluatedValueDisplay && (
+            <span className="text-[10px] text-accent/80 font-mono shrink-0 bg-accent/10 px-1 py-0.2 rounded-xs">
+              {evaluatedValueDisplay}
+            </span>
+          )}
+
+          {/* Delete keyframe button if one is selected in this group */}
+          {selectedKeyframe && (
+            <button
+              type="button"
+              onClick={handleDeleteSelectedKeyframe}
+              title={`Delete keyframe at ${selectedKeyframe.time.toFixed(2)}s`}
+              className="p-0.5 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded transition-colors"
+              aria-label="Delete keyframe"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          )}
+
+          {/* Add keyframe button at current playhead */}
+          <button
+            type="button"
+            onClick={handleAddKeyframeClick}
+            title={`Add keyframe at ${currentTime.toFixed(2)}s`}
+            className="p-0.5 text-text-muted hover:text-accent hover:bg-accent/20 rounded transition-colors"
+            aria-label="Add keyframe"
+          >
+            <Plus className="h-3 w-3" />
+          </button>
+        </div>
       </div>
 
       {/* Right Column: Keyframe Lane */}
@@ -95,9 +153,12 @@ export const PropertyTrackRow: React.FC<PropertyTrackRowProps> = ({
             key={kf.id}
             keyframe={kf}
             pixelsPerSecond={pixelsPerSecond}
+            fps={fps}
             isSelected={kf.id === selectedKeyframeId}
             propertyName={propertyGroup.name}
             onClick={() => onSelectKeyframe?.(kf.id, propertyGroup.id)}
+            onMoveKeyframe={(_, newTime) => onMoveKeyframe?.(element.id, kf.id, newTime)}
+            onCommitMove={(_, finalTime) => onMoveKeyframe?.(element.id, kf.id, finalTime)}
           />
         ))}
       </div>

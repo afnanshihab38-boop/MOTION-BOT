@@ -5,3 +5,4 @@
  */
 
 export * from "./timeline-model";
+export * from "./keyframe-manipulation";

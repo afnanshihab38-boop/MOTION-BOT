@@ -10,6 +10,7 @@
  */
 
 import * as React from "react";
+import { Layers } from "lucide-react";
 import { EditorState, ResizeHandleId, CanvasPoint } from "@/types/editor";
 import { MotionElement } from "@/types/element";
 import { Asset } from "@/types/asset";
@@ -31,13 +32,19 @@ import {
   rotateElement,
   calculateRotationAngle,
 } from "@/services/editor/element-manipulation";
+import { Project } from "@/types/project";
+import { getEvaluatedSceneAtTime } from "@/timeline";
 import { cn } from "@/lib/utils";
 
 export interface EditorCanvasProps {
   editorState: EditorState;
   onStateChange: (updater: (prev: EditorState) => EditorState) => void;
+  onCommitChange?: (previousProject: Project) => void;
+  onDeleteSelected?: () => void;
+  onDuplicateSelected?: () => void;
   assets?: Asset[];
   className?: string;
+  currentTime?: number;
 }
 
 interface InteractionState {
@@ -52,14 +59,19 @@ interface InteractionState {
   initialElement?: MotionElement;
   centerCanvasPoint?: CanvasPoint;
   initialRotation?: number;
+  preDragProject?: Project;
   hasDragged: boolean;
 }
 
 export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   editorState,
   onStateChange,
+  onCommitChange,
+  onDeleteSelected,
+  onDuplicateSelected,
   assets = [],
   className,
+  currentTime,
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isSpacePressed, setIsSpacePressed] = React.useState(false);
@@ -68,6 +80,16 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const interactionRef = React.useRef<InteractionState | null>(null);
 
   const activeScene = getActiveScene(editorState);
+
+  // Live motion evaluation: interpolates active scene at currentTime if provided
+  const renderedScene = React.useMemo(() => {
+    if (!activeScene) return null;
+    if (typeof currentTime === "number") {
+      return getEvaluatedSceneAtTime(activeScene, currentTime);
+    }
+    return activeScene;
+  }, [activeScene, currentTime]);
+
   const { zoom, panX, panY } = editorState.viewport;
   const { width: projectWidth, height: projectHeight } = editorState.project;
 
@@ -117,6 +139,20 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
         return;
       }
 
+      // Delete or Backspace key deletes selected element(s)
+      if ((e.code === "Delete" || e.code === "Backspace") && editorState.selectedElementIds.length > 0) {
+        e.preventDefault();
+        onDeleteSelected?.();
+        return;
+      }
+
+      // Cmd+D or Ctrl+D duplicates selected element(s)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d" && editorState.selectedElementIds.length > 0) {
+        e.preventDefault();
+        onDuplicateSelected?.();
+        return;
+      }
+
       // Nudge selected unlocked elements with arrow keys
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) {
         if (editorState.selectedElementIds.length === 0) return;
@@ -162,7 +198,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [activeScene, editorState.selectedElementIds, onStateChange]);
+  }, [activeScene, editorState.selectedElementIds, onStateChange, onDeleteSelected, onDuplicateSelected]);
 
   // Mouse wheel: Ctrl/Meta for zoom, otherwise pan
   const handleWheel = React.useCallback(
@@ -291,6 +327,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
         startClientY: e.clientY,
         startCanvasPoint,
         initialElements: initialMap,
+        preDragProject: editorState.project,
         hasDragged: false,
       };
     },
@@ -299,6 +336,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
       editorState.activeTool,
       editorState.viewport,
       editorState.selectedElementIds,
+      editorState.project,
       activeScene,
       onStateChange,
     ]
@@ -309,6 +347,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     (handle: ResizeHandleId, e: React.MouseEvent) => {
       if (e.button !== 0) return;
       e.stopPropagation();
+      e.preventDefault();
 
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect || !activeScene) return;
@@ -334,10 +373,11 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
           ...targetElement,
           transform: { ...targetElement.transform },
         },
+        preDragProject: editorState.project,
         hasDragged: false,
       };
     },
-    [activeScene, editorState.selectedElementIds, editorState.viewport]
+    [activeScene, editorState.selectedElementIds, editorState.viewport, editorState.project]
   );
 
   // Rotation handle mouse down: initiates drag-rotation
@@ -345,6 +385,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     (e: React.MouseEvent) => {
       if (e.button !== 0) return;
       e.stopPropagation();
+      e.preventDefault();
 
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect || !activeScene) return;
@@ -388,10 +429,11 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
           transform: { ...targetElement.transform },
         },
         initialRotation: rotation,
+        preDragProject: editorState.project,
         hasDragged: false,
       };
     },
-    [activeScene, editorState.selectedElementIds, editorState.viewport]
+    [activeScene, editorState.selectedElementIds, editorState.viewport, editorState.project]
   );
 
   // Global window listeners for drag move and drag release
@@ -457,6 +499,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
           {
             snapToGrid: editorState.snapToGrid,
             gridSize: editorState.gridSize,
+            preserveAspect: e.shiftKey ? true : undefined,
           }
         );
         onStateChange((prev) => updateElementsInActiveScene(prev, [resized]));
@@ -479,7 +522,11 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     };
 
     const handleWindowMouseUp = () => {
-      if (interactionRef.current) {
+      const interaction = interactionRef.current;
+      if (interaction) {
+        if (interaction.hasDragged && interaction.preDragProject) {
+          onCommitChange?.(interaction.preDragProject);
+        }
         setIsPanningInternal(false);
         interactionRef.current = null;
       }
@@ -496,6 +543,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     editorState.snapToGrid,
     editorState.gridSize,
     onStateChange,
+    onCommitChange,
   ]);
 
   // Stage background click deselects elements if clicking empty canvas space
@@ -520,11 +568,12 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
   // Calculate aggregate bounds of selected elements for SelectionOverlay
   const selectedElements = React.useMemo(() => {
-    if (!activeScene) return [];
-    return activeScene.elements.filter((el) =>
+    const sceneToUse = renderedScene || activeScene;
+    if (!sceneToUse) return [];
+    return sceneToUse.elements.filter((el) =>
       editorState.selectedElementIds.includes(el.id)
     );
-  }, [activeScene, editorState.selectedElementIds]);
+  }, [renderedScene, activeScene, editorState.selectedElementIds]);
 
   const selectionBounds = React.useMemo(() => {
     return calculateAggregateBounds(selectedElements);
@@ -627,10 +676,10 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
             </div>
           )}
 
-          {/* Active Scene Elements */}
-          {activeScene && (
+          {/* Active Scene Elements (Live Animated) */}
+          {renderedScene && (
             <SceneRenderer
-              scene={activeScene}
+              scene={renderedScene}
               assets={assets}
               selectedElementIds={editorState.selectedElementIds}
               hoveredElementId={editorState.hoveredElementId}
@@ -643,6 +692,21 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
                 onStateChange((prev) => ({ ...prev, hoveredElementId: null }))
               }
             />
+          )}
+
+          {/* Empty Scene Visual Guidance */}
+          {renderedScene && renderedScene.elements.length === 0 && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 pointer-events-none select-none text-center">
+              <div className="p-4 rounded-xl border border-dashed border-border/70 bg-surface/30 backdrop-blur-xs flex flex-col items-center max-w-sm">
+                <div className="w-10 h-10 rounded-lg bg-surface-elevated border border-border flex items-center justify-center text-text-muted mb-2">
+                  <Layers className="h-5 w-5" />
+                </div>
+                <p className="text-xs font-semibold text-text-primary">Empty Scene</p>
+                <p className="text-[11px] text-text-muted mt-1 leading-snug">
+                  Use the left toolbar to add text, shapes, or import media assets to this scene.
+                </p>
+              </div>
+            </div>
           )}
 
           {/* Selection Box & Transform Handles */}

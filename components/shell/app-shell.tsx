@@ -39,7 +39,7 @@ export function AppShell({
             <span className="font-mono text-text-muted/60">v0.1.0-alpha</span>
           </div>
           <div className="flex items-center gap-4">
-            <span>Phase 2.3 — Shell & Navigation</span>
+            <span>Studio Workspace</span>
           </div>
         </div>
       </footer>
